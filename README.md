@@ -19,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="https://leonida-evidence.vercel.app"><b>▶ Play it live</b></a> ·
   <a href="#how-to-play">How to play</a> ·
   <a href="#the-five-jobs">The five jobs</a> ·
   <a href="#how-it-works">How it works</a> ·
