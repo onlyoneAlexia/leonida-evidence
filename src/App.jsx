@@ -8,9 +8,15 @@ import './App.css';
 const MAX_STARS = 5;
 
 // Resize and frame change the output size/framing; everything else is fair game.
+// The Unlayer project id unlocks the AI Assistant ("the AI fixer").
 const EDITOR_OPTIONS = {
   theme: 'dark',
-  features: { imageEditor: { tools: { resize: false, frame: false } } },
+  projectId: 289605,
+  aiAssistantOpenState: 'open',
+  features: {
+    ai: { enabled: true, assistant: true },
+    imageEditor: { tools: { resize: false, frame: false } },
+  },
 };
 
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');

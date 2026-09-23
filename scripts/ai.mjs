@@ -1,0 +1,13 @@
+import { chromium } from 'playwright-core';
+const b = await chromium.launch({ channel: 'msedge' });
+const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+p.on('pageerror', e => console.log('PAGEERROR', e.message));
+p.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') console.log(m.type(), m.text().slice(0, 250)); });
+p.on('response', r => { if (r.status() >= 400) console.log('HTTP', r.status(), r.url().slice(0, 120)); });
+await p.goto('http://localhost:5199/');
+await p.getByText('Open the evidence locker').click({ timeout: 20000 });
+await p.getByText('Start doctoring').click();
+await p.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'), null, { timeout: 30000 });
+await p.waitForTimeout(3000);
+await p.screenshot({ path: 'scripts/ai1.png' });
+await b.close();
