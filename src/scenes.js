@@ -258,6 +258,16 @@ function person(g, o, rand) {
     g.fillStyle = 'rgba(255,120,200,0.7)';
     g.fillRect(hx - 19 * s, eyeY - 5 * s, 6 * s, 2 * s);
     g.fillRect(hx + 6 * s, eyeY - 5 * s, 6 * s, 2 * s);
+  } else if (o.blink) {
+    g.strokeStyle = '#2a1a10';
+    g.lineWidth = 2 * s;
+    g.lineCap = 'round';
+    for (const ex of [-12, 12]) {
+      g.beginPath();
+      g.moveTo(hx + (ex - 6) * s, eyeY + 1 * s);
+      g.quadraticCurveTo(hx + ex * s, eyeY + 4 * s, hx + (ex + 6) * s, eyeY + 1 * s);
+      g.stroke();
+    }
   } else {
     for (const ex of [-12, 12]) {
       g.fillStyle = '#fff';
@@ -802,6 +812,22 @@ export const CASES = [
     ],
   },
 ];
+
+// Full-size character portraits on a transparent canvas, for the home page.
+export const CHARACTERS = {
+  jason: { ...JASON, cap: null },
+  lucia: { ...LUCIA, tattoo: true, shirt: '#f2ede4', pants: '#2b4f8f' },
+  rico: { ...RICO },
+};
+
+export function renderCharacter(key, { blink = false, scale = 2.2 } = {}) {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(175 * scale);
+  canvas.height = Math.round(345 * scale);
+  const g = canvas.getContext('2d');
+  person(g, { ...CHARACTERS[key], x: canvas.width / 2, y: canvas.height - 4, s: scale, blink }, rng(42));
+  return canvas.toDataURL('image/png');
+}
 
 export async function ensureFonts() {
   await Promise.all([

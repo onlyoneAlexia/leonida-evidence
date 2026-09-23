@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ImageEditor from '@unlayer/react-image-editor';
 import { CASES, W, H, ensureFonts, renderCase } from './scenes.js';
 import { analyse } from './forensics.js';
 import { buildRapSheet, rankFor } from './rapsheet.js';
+import Home from './Home.jsx';
 import './App.css';
 
 const MAX_STARS = 5;
@@ -21,44 +22,37 @@ const EDITOR_OPTIONS = {
 
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
 
-function Stars({ count, big }) {
-  return (
-    <span className={`stars ${big ? 'big' : ''}`} aria-label={`${count} of ${MAX_STARS} wanted stars`}>
-      {Array.from({ length: MAX_STARS }, (_, i) => (
-        <span key={i} className={i < count ? 'on' : ''}>★</span>
-      ))}
-    </span>
-  );
+// Rolls a cash figure up from a previous value, slot-machine style.
+function CountUp({ from = 0, to, delay = 0 }) {
+  const [v, setV] = useState(from);
+  useEffect(() => {
+    let raf;
+    const start = performance.now() + delay;
+    const tick = (now) => {
+      const t = Math.min(1, Math.max(0, (now - start) / 1100));
+      setV(from + (to - from) * (1 - (1 - t) ** 3));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [from, to, delay]);
+  return money(v);
 }
 
-function Title({ onStart, cover, alias, setAlias }) {
+// Stars earned since `prev` pop in one after another.
+function Stars({ count, prev = count }) {
   return (
-    <div className="screen title" style={{ backgroundImage: cover ? `url(${cover})` : undefined }}>
-      <div className="title-inner">
-        <p className="kicker">A Leonida story · 5 jobs · 1 image editor</p>
-        <h1 className="logo">
-          <span>LEONIDA</span>
-          <span className="logo-sub">EVIDENCE ROOM</span>
-        </h1>
-        <p className="lede">
-          Lucia and Jason pulled five jobs across Leonida. The VCPD has the tapes. You have a
-          photo lab, the React Image Editor, and a clock. Scrub every face, plate and bag of cash
-          before forensics runs — and don't touch the timestamp.
-        </p>
-        <label className="alias">
-          <span>Your fixer alias</span>
-          <input value={alias} maxLength={18} onChange={(e) => setAlias(e.target.value)} placeholder="The Cleaner" />
-        </label>
-        <button className="btn primary" onClick={onStart} disabled={!cover}>
-          {cover ? 'Open the evidence locker' : 'Loading tapes…'}
-        </button>
-        <ul className="how">
-          <li><b>Hide</b> the marked evidence: draw over it, drop a shape or sticker, blur it, or crop it out.</li>
-          <li><b>Keep</b> the timestamp (and anything framing Rico) intact. Tampering adds wanted stars.</li>
-          <li><b>5 stars</b> and you're busted. Leftover seconds and a clean edit earn extra cash.</li>
-        </ul>
-      </div>
-    </div>
+    <span className="stars" aria-label={`${count} of ${MAX_STARS} wanted stars`}>
+      {Array.from({ length: MAX_STARS }, (_, i) => (
+        <span
+          key={i}
+          className={`${i < count ? 'on' : ''} ${i >= prev && i < count ? 'new' : ''}`}
+          style={{ animationDelay: `${1.9 + (i - prev) * 0.25}s` }}
+        >
+          ★
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -242,8 +236,8 @@ function Verdict({ index, scene, entry, stars, cash, onNext }) {
       <div className="verdict-card">
         <div className="brief-head">
           <span className="case-no">VCPD FORENSICS · CASE {index + 1}</span>
-          <Stars count={stars} />
-          <span className="cash">{money(cash)}</span>
+          <Stars count={stars} prev={Math.max(0, stars - entry.heat)} />
+          <span className="cash"><CountUp from={cash - entry.total} to={cash} delay={1700} /></span>
         </div>
         <div className="verdict-body">
           <div className={`evidence-photo doctored ${scanning ? 'scanning' : ''}`}>
@@ -265,7 +259,7 @@ function Verdict({ index, scene, entry, stars, cash, onNext }) {
               <p className="stamp-text">Running forensics…</p>
             ) : (
               <>
-                <p className={`stamp-text ${clean ? 'good' : 'bad'}`}>{headline}</p>
+                <p className={`stamp-text slam ${clean ? 'good' : 'bad'}`}>{headline}</p>
                 {entry.reason === 'timeout' && <p className="note">Time ran out. The tape went in as-is.</p>}
                 {analysis.unrecognisable && (
                   <p className="note">That still no longer matches the tape. The detectives are asking questions.</p>
@@ -374,10 +368,9 @@ export default function App() {
     setPhase('briefing');
   };
 
-  const cover = useMemo(() => scenes?.[1]?.dataUrl, [scenes]);
   const name = alias.trim() || 'The Cleaner';
 
-  if (phase === 'title') return <Title onStart={() => setPhase('briefing')} cover={cover} alias={alias} setAlias={setAlias} />;
+  if (phase === 'title') return <Home ready={!!scenes} scenes={scenes} alias={alias} setAlias={setAlias} onStart={() => { window.scrollTo(0, 0); setPhase('briefing'); }} />;
   if (phase === 'briefing') return <Briefing index={index} c={c} scene={scene} stars={stars} cash={cash} onGo={() => setPhase('lab')} />;
   if (phase === 'lab') return <Lab key={`${attempt}-${index}`} index={index} c={c} scene={scene} stars={stars} cash={cash} onSubmit={onSubmit} />;
   if (phase === 'analysing') return <div className="screen center"><p className="stamp-text">Uploading to VCPD evidence…</p></div>;
