@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ImageEditor from '@unlayer/react-image-editor';
 import { CASES, W, H, ensureFonts, renderCase } from './scenes.js';
 import { analyse } from './forensics.js';
 import { buildRapSheet, rankFor } from './rapsheet.js';
-import Home from './Home.jsx';
 import './App.css';
 
 const MAX_STARS = 5;
@@ -53,6 +52,37 @@ function Stars({ count, prev = count }) {
         </span>
       ))}
     </span>
+  );
+}
+
+function Title({ onStart, cover, alias, setAlias }) {
+  return (
+    <div className="screen title" style={{ backgroundImage: cover ? `url(${cover})` : undefined }}>
+      <div className="title-inner">
+        <p className="kicker">A Leonida story · 5 jobs · 1 image editor</p>
+        <h1 className="logo">
+          <span>LEONIDA</span>
+          <span className="logo-sub">EVIDENCE ROOM</span>
+        </h1>
+        <p className="lede">
+          Lucia and Jason pulled five jobs across Leonida. The VCPD has the tapes. You have a
+          photo lab, the React Image Editor, and a clock. Scrub every face, plate and bag of cash
+          before forensics runs — and don't touch the timestamp.
+        </p>
+        <label className="alias">
+          <span>Your fixer alias</span>
+          <input value={alias} maxLength={18} onChange={(e) => setAlias(e.target.value)} placeholder="The Cleaner" />
+        </label>
+        <button className="btn primary" onClick={onStart} disabled={!cover}>
+          {cover ? 'Open the evidence locker' : 'Loading tapes…'}
+        </button>
+        <ul className="how">
+          <li><b>Hide</b> the marked evidence: draw over it, drop a shape or sticker, blur it, or crop it out.</li>
+          <li><b>Keep</b> the timestamp (and anything framing Rico) intact. Tampering adds wanted stars.</li>
+          <li><b>5 stars</b> and you're busted. Leftover seconds and a clean edit earn extra cash.</li>
+        </ul>
+      </div>
+    </div>
   );
 }
 
@@ -368,9 +398,10 @@ export default function App() {
     setPhase('briefing');
   };
 
+  const cover = useMemo(() => scenes?.[1]?.dataUrl, [scenes]);
   const name = alias.trim() || 'The Cleaner';
 
-  if (phase === 'title') return <Home ready={!!scenes} scenes={scenes} alias={alias} setAlias={setAlias} onStart={() => { window.scrollTo(0, 0); setPhase('briefing'); }} />;
+  if (phase === 'title') return <Title onStart={() => setPhase('briefing')} cover={cover} alias={alias} setAlias={setAlias} />;
   if (phase === 'briefing') return <Briefing index={index} c={c} scene={scene} stars={stars} cash={cash} onGo={() => setPhase('lab')} />;
   if (phase === 'lab') return <Lab key={`${attempt}-${index}`} index={index} c={c} scene={scene} stars={stars} cash={cash} onSubmit={onSubmit} />;
   if (phase === 'analysing') return <div className="screen center"><p className="stamp-text">Uploading to VCPD evidence…</p></div>;
