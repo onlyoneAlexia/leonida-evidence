@@ -813,6 +813,22 @@ export const CASES = [
   },
 ];
 
+// Full-size character portraits on a transparent canvas, for the home page.
+export const CHARACTERS = {
+  jason: { ...JASON, cap: null },
+  lucia: { ...LUCIA, tattoo: true, shirt: '#f2ede4', pants: '#2b4f8f' },
+  rico: { ...RICO },
+};
+
+export function renderCharacter(key, { blink = false, scale = 2.2 } = {}) {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(175 * scale);
+  canvas.height = Math.round(345 * scale);
+  const g = canvas.getContext('2d');
+  person(g, { ...CHARACTERS[key], x: canvas.width / 2, y: canvas.height - 4, s: scale, blink }, rng(42));
+  return canvas.toDataURL('image/png');
+}
+
 export async function ensureFonts() {
   await Promise.all([
     document.fonts.load('44px Anton'),
