@@ -752,19 +752,86 @@
   text-transform: uppercase;
 }
 
+/* The hero scales as one piece with the card width (like a poster), so the
+   side-by-side layout holds from desktop down to tablet widths. */
+.hero-card {
+  container-type: inline-size;
+  min-height: 0;
+}
+
+.hero-copy {
+  max-width: 50cqw;
+  min-height: clamp(380px, 46cqw, 540px);
+  padding: clamp(28px, 4.6cqw, 56px) clamp(22px, 4cqw, 48px) clamp(26px, 3.4cqw, 40px);
+}
+
+.hero-nav {
+  padding: clamp(18px, 2.2cqw, 26px) clamp(22px, 4cqw, 48px) 0;
+}
+
+.hero-nav ul {
+  gap: clamp(18px, 2.9cqw, 34px);
+}
+
+.hero-title span {
+  font-size: clamp(52px, 9.5cqw, 112px);
+}
+
+.hero-title .sub {
+  font-size: clamp(22px, 3.7cqw, 44px);
+}
+
+.hero-desc {
+  font-size: clamp(13px, 1.3cqw, 15px);
+  margin: clamp(12px, 1.7cqw, 20px) 0 clamp(16px, 2.2cqw, 26px);
+}
+
+.hero-actions input {
+  max-width: min(100%, 330px);
+}
+
+.figure img {
+  height: min(640px, 54cqw);
+}
+
+.bio {
+  width: clamp(200px, 21cqw, 250px);
+}
+
+@container (max-width: 900px) {
+  .bio {
+    display: none;
+  }
+
+  .tools-row,
+  .carousel-dots {
+    margin-top: 22px;
+  }
+
+  .pill {
+    padding: 11px 20px;
+  }
+}
+
 @media (max-width: 960px) {
+  .home-how ol {
+    grid-template-columns: 1fr;
+  }
+
+  .case-strip {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Phones: stack the cast under the copy. */
+@media (max-width: 600px) {
   .home {
     padding: 40px 14px 40px;
   }
 
   .hero-card {
-    min-height: 0;
     clip-path: inset(0 round 22px);
     padding-bottom: 420px;
-  }
-
-  .hero-nav {
-    padding: 20px 22px 0;
   }
 
   .hero-nav ul {
@@ -772,7 +839,8 @@
   }
 
   .hero-copy {
-    padding: 30px 22px 10px;
+    max-width: none;
+    min-height: 0;
   }
 
   .hero-sky::before {
@@ -800,14 +868,6 @@
 
   .figure.rico {
     left: 62%;
-  }
-
-  .bio {
-    display: none;
-  }
-
-  .home-how ol {
-    grid-template-columns: 1fr;
   }
 
   .case-strip {
