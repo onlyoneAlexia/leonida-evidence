@@ -26,3 +26,6 @@ dist-ssr
 # test harness output
 scripts/*.png
 /tmp/
+
+.vercel
+.env*
