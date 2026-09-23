@@ -1,0 +1,12 @@
+Sound effects by Kenney (www.kenney.nl), released under Creative Commons Zero (CC0 1.0):
+http://creativecommons.org/publicdomain/zero/1.0/
+
+Each file was converted from the original OGG to a trimmed, mono, peak-normalised 16-bit WAV.
+
+shutter.wav  RPG Audio        metalLatch.ogg
+tick.wav     Interface Sounds tick_002.ogg
+clear.wav    Interface Sounds select_003.ogg
+alert.wav    Interface Sounds error_004.ogg
+stamp.wav    Impact Sounds    impactWood_heavy_000.ogg
+busted.wav   Impact Sounds    impactMetal_heavy_001.ogg, mixed with Digital Audio lowDown.ogg
+cash.wav     RPG Audio        handleCoins.ogg

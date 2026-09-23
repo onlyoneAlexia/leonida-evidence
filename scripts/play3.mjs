@@ -5,7 +5,7 @@ p.on('pageerror', e => console.log('PAGEERROR', e.message));
 p.on('console', m => { if (m.type() === 'error') console.log('console.error:', m.text().slice(0, 200)); });
 await p.goto('http://localhost:5199/');
 await p.getByPlaceholder('Your fixer alias').fill('Tidy Tim');
-await p.locator('.hero-actions .pill.solid').click({ timeout: 20000 });
+await p.getByRole('button', { name: /START THE FIRST JOB/ }).click({ timeout: 20000 });
 for (let i = 0; i < 5; i++) {
   await p.getByText('Start doctoring').click();
   await p.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'), null, { timeout: 30000 });

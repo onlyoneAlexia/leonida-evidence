@@ -31,7 +31,11 @@ body,
 
 .screen {
   min-height: 100vh;
-  padding: 32px 20px;
+  min-height: 100svh;
+  /* Fluid gutters: small phones get the width back, 500px and up keep 32/20. */
+  padding: clamp(16px, 6.4vw, 32px) clamp(12px, 4vw, 20px);
+  /* The stamp slams in at 2.6x. Unclipped, that overflow widens the layout viewport on phones, shifting the page sideways and misplacing taps. */
+  overflow-x: clip;
 }
 
 .screen.center {
@@ -73,6 +77,31 @@ body,
   box-shadow: 0 8px 30px rgba(255, 79, 216, 0.35);
 }
 
+.sound-toggle {
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.sound-toggle svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.sound-toggle[aria-pressed='false'] {
+  color: var(--muted);
+}
+
+.brief-head .sound-toggle {
+  margin-left: auto;
+}
+
 .kicker {
   font: 600 13px 'IBM Plex Mono', monospace;
   letter-spacing: 0.18em;
@@ -106,8 +135,10 @@ body,
   color: #fff;
 }
 
+/* The rap sheet heading is the player's rank; the poster below carries RAP SHEET / BUSTED. */
 .logo.small span {
-  font-size: clamp(56px, 10vw, 110px);
+  font-size: clamp(44px, 7vw, 76px);
+  text-transform: uppercase;
 }
 
 .lede {
@@ -181,14 +212,21 @@ body,
 }
 
 /* Shared case chrome */
+.screen.briefing,
+.screen.verdict {
+  display: grid;
+  align-content: center;
+}
+
 .brief-card,
 .verdict-card {
+  width: 100%;
   max-width: 1240px;
   margin: 0 auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 24px;
+  padding: clamp(14px, 4.8vw, 24px);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
 }
 
@@ -404,6 +442,7 @@ body,
 .screen.lab {
   padding: 0;
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
 }
@@ -512,10 +551,77 @@ body,
   color: var(--text);
 }
 
+/* A column flexbox gives the wrapper's inline `flex: 1` a definite height, so the SDK
+   root (height: 100%) fits the workspace and tall tool panels no longer stretch it. */
 .editor-wrap {
+  container-type: inline-size;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
   height: 100%;
+}
+
+.editor-status {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 28px;
+  min-height: 250px;
+  text-align: center;
+  background: var(--panel);
+}
+
+.editor-status p { max-width: 460px; line-height: 1.7; }
+
+.workspace-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.workspace-controls .btn { padding: 8px 12px; font-size: 12px; }
+.workspace-controls > span { margin-left: auto; font-size: 11px; color: var(--muted); }
+.lab .lab-body.orders-hidden { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.lab-side[hidden] { display: none; }
+.lab.workspace-expanded { position: fixed; inset: 0; z-index: 100; background: var(--ink); }
+.lab.workspace-expanded .hud { padding-block: 5px; }
+.lab.workspace-expanded .timer { font-size: 32px; }
+.lab.workspace-expanded .hud strong { font-size: 18px; }
+.lab .tools-collapsed [data-testid="native-tool-options"] { display: none !important; }
+.lab [data-testid="native-editor"] { position: relative; }
+
+/* A floating settings drawer leaves the scene at its normal zoom on narrow
+   workspaces. The controls above can hide it without deactivating Draw. */
+@container (max-width: 900px) {
+  .lab [data-testid="native-tool-options"] {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 72px;
+    z-index: 10;
+    width: min(288px, calc(100% - 80px));
+    box-shadow: -10px 0 24px #0005;
+  }
+}
+@media (max-width: 900px) {
+  .workspace-controls > span { display: none; }
+}
+@media (max-width: 480px) {
+  .workspace-controls { gap: 5px; padding: 7px 8px; }
+  .workspace-controls .btn { flex: 1; padding: 9px 6px; font-size: 10px; white-space: nowrap; }
+  .workspace-controls .sound-toggle { flex: 0 0 auto; padding-inline: 9px; }
+  .workspace-controls .sound-label { display: none; }
 }
 
 /* Verdict */
@@ -583,6 +689,75 @@ body,
   color: var(--good);
 }
 
+.ledger dd.bad {
+  color: var(--bad);
+}
+
+/* Forensics readout: one line per evidence box as the scan reaches it. */
+.scan-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+  font: 600 13px 'IBM Plex Mono', monospace;
+}
+
+.scan-log li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border-left: 4px solid var(--good);
+  background: var(--panel-2);
+  animation: fadeUp 0.3s both;
+}
+
+.scan-log b {
+  letter-spacing: 0.12em;
+  color: var(--good);
+}
+
+.scan-log .fail {
+  border-left-color: var(--bad);
+}
+
+.scan-log .fail b {
+  color: var(--bad);
+}
+
+/* Busted: the still drains to grey and a stamp slams across it. */
+.evidence-photo.doctored {
+  container-type: inline-size;
+}
+
+.evidence-photo.busted > img {
+  filter: grayscale(1) contrast(1.2) brightness(0.7);
+  transition: filter 0.8s ease-out;
+}
+
+.busted-stamp {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  pointer-events: none;
+}
+
+.busted-stamp span {
+  padding: 0 0.22em;
+  border: 0.06em solid currentColor;
+  border-radius: 0.05em;
+  background: rgba(13, 7, 20, 0.5);
+  color: var(--bad);
+  font: 400 15cqw/1.15 Anton, Impact, sans-serif;
+  letter-spacing: 0.08em;
+  text-shadow: 0 0.04em 0.2em rgba(0, 0, 0, 0.6);
+  animation: slam 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
 /* Rap sheet */
 .rapsheet {
   background: radial-gradient(circle at 50% 0%, #3a0f4a 0%, var(--ink) 60%);
@@ -597,12 +772,33 @@ body,
   align-items: center;
 }
 
-.poster {
+/* Holds the poster's 4:5 frame while it prints, so the page doesn't jump when it lands. */
+.poster-slot {
+  display: grid;
+  place-items: center;
   width: 100%;
   max-width: 540px;
+  aspect-ratio: 4 / 5;
+  margin: 8px 0 24px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.poster-slot p {
+  margin: 0;
+  padding: 20px;
+  font: 600 13px 'IBM Plex Mono', monospace;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.poster {
+  display: block;
+  width: 100%;
+  height: 100%;
   border-radius: 12px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
-  margin: 8px 0 24px;
 }
 
 .actions {
@@ -625,6 +821,7 @@ body,
 
   .lab-side {
     max-height: 30vh;
+    max-height: 30dvh;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
@@ -649,6 +846,19 @@ body,
     padding: 10px 14px;
     font-size: 13px;
   }
+}
+
+/* Landscape phones: the editor needs the height more than the HUD does. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .hud { padding-block: 4px; }
+  .timer { font-size: 28px; }
+  .workspace-controls { padding-block: 4px; }
+}
+
+/* Touch screens: 44px minimum targets. */
+@media (pointer: coarse) {
+  .btn { min-height: 44px; }
+  .sound-toggle { min-width: 44px; }
 }
 
 /* ---------- Motion ---------- */

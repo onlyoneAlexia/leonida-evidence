@@ -1,0 +1,14 @@
+import { open, startCase, imageRect, toScreen, targets } from './lib.mjs';
+const { b, p } = await open();
+await startCase(p);
+const t = await targets(p, 0);
+console.log('targets', JSON.stringify(t.map(x => [x.key, x.rect])));
+const wrapH0 = await p.evaluate(() => document.querySelector('.editor-wrap').getBoundingClientRect().height);
+await p.getByTestId('native-tool-stickers').click();
+await p.waitForTimeout(1200);
+const wrapH1 = await p.evaluate(() => document.querySelector('.editor-wrap').getBoundingClientRect().height);
+console.log('editor-wrap height before/after stickers', wrapH0, wrapH1, 'page scrollH', await p.evaluate(() => document.documentElement.scrollHeight));
+await p.getByTestId('native-sticker-emoticons-agent').click();
+await p.waitForTimeout(1200);
+await p.screenshot({ path: 'scripts/y1-sticker-added.png' });
+await b.close();

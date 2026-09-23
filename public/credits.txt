@@ -1,0 +1,37 @@
+LEONIDA EVIDENCE ROOM: CREDITS AND LICENSES
+============================================
+
+Made by timidanx for the Build with React Image Editor Challenge.
+#BuiltWithImageEditor
+
+The game's source code is released under the MIT License.
+
+
+IMAGE EDITOR AND LIBRARIES
+  Unlayer Image Editor, loaded from Unlayer's CDN under Unlayer's terms.
+  @unlayer/react-image-editor: MIT License, (c) 2026 Unlayer.
+  React, React DOM and Scheduler: MIT License, (c) Meta Platforms, Inc. and affiliates.
+  Full license texts: /third-party-licenses.txt
+
+FONTS
+  Slackey by Sideshow (Font Diner, Inc.): Apache License 2.0.
+    /fonts/Slackey-LICENSE.txt
+  Jersey 10 by The Soft Type Project Authors: SIL Open Font License 1.1.
+    /fonts/Jersey10-OFL.txt
+  Anton (Vernon Adams), IBM Plex Mono (IBM) and Montserrat (Julieta Ulanovsky
+  and contributors): SIL Open Font License 1.1, served by Google Fonts.
+
+SOUND EFFECTS
+  Kenney (www.kenney.nl): CC0 1.0 public domain dedication.
+  Source file for each sound: /audio/CREDITS.txt
+
+ARTWORK
+  Illustrations generated for this project from character references
+  supplied by the author. The CCTV scenes are drawn in code.
+
+TRADEMARKS
+  The Unlayer name and logo are trademarks of Unlayer and appear only to
+  credit the editor.
+  Grand Theft Auto and Rockstar Games are trademarks of Take-Two Interactive
+  Software, Inc. This is an unofficial fan project, not affiliated with or
+  endorsed by Rockstar Games or Take-Two.

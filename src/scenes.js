@@ -1,5 +1,6 @@
-// Procedural CCTV stills for each case. Every scene is drawn in code so we
-// know exactly where each piece of evidence sits (the forensics check needs it).
+// Procedural CCTV environments with illustrated character sprites. Scene and
+// sprite coordinates provide exact evidence bounds for the forensics checks.
+import { drawAvatar, loadAvatarArt } from './avatars.js';
 
 export const W = 1280;
 export const H = 720;
@@ -81,7 +82,7 @@ function palm(g, x, baseY, h, color, lean = 0) {
 
 function neon(g, text, x, y, size, color, font = 'Anton') {
   g.save();
-  g.font = `${size}px ${font}`;
+  g.font = `${size}px ${font}, sans-serif`;
   g.textBaseline = 'middle';
   g.shadowColor = color;
   g.shadowBlur = 24;
@@ -117,6 +118,8 @@ function hawaiian(g, x, y, w, h, base, flower, rand) {
 
 // Draws a stylised person standing with feet at (x, y). Returns evidence rects.
 function person(g, o, rand) {
+  const illustrated = drawAvatar(g, o);
+  if (illustrated) return illustrated;
   const s = o.s ?? 1;
   const skin = o.skin;
   const hx = o.x;
@@ -201,7 +204,7 @@ function person(g, o, rand) {
     g.lineTo(tx + 8 * s, ty + 12 * s);
     g.stroke();
     g.fillStyle = '#1d2a55';
-    g.font = `bold ${11 * s}px IBM Plex Mono`;
+    g.font = `bold ${11 * s}px IBM Plex Mono, monospace`;
     g.textAlign = 'center';
     g.fillText('L+J', tx, ty + 40 * s);
     g.restore();
@@ -336,14 +339,14 @@ function plate(g, x, y, w, text) {
   g.lineWidth = 2;
   g.stroke();
   g.fillStyle = '#d2224b';
-  g.font = `700 ${w * 0.13}px IBM Plex Mono`;
+  g.font = `700 ${w * 0.13}px IBM Plex Mono, monospace`;
   g.textAlign = 'center';
   g.fillText('LEONIDA', x + w / 2, y + h * 0.28);
   g.fillStyle = '#10204a';
-  g.font = `700 ${w * 0.24}px IBM Plex Mono`;
+  g.font = `700 ${w * 0.24}px IBM Plex Mono, monospace`;
   g.fillText(text, x + w / 2, y + h * 0.72);
   g.fillStyle = '#2e8b57';
-  g.font = `${w * 0.09}px IBM Plex Mono`;
+  g.font = `${w * 0.09}px IBM Plex Mono, monospace`;
   g.fillText('SUNSHINE STATE', x + w / 2, y + h * 0.92);
   g.restore();
   return { x: x - 6, y: y - 6, w: w + 12, h: h + 12 };
@@ -420,7 +423,7 @@ function cctv(g, rand, cam, place, time) {
   g.fillRect(0, 0, W, H);
 
   g.save();
-  g.font = '600 22px IBM Plex Mono';
+  g.font = '600 22px IBM Plex Mono, monospace';
   g.textBaseline = 'middle';
   g.fillStyle = 'rgba(0,0,0,0.55)';
   g.fillRect(20, 18, g.measureText(`${cam}  ${place}`).width + 28, 38);
@@ -434,7 +437,7 @@ function cctv(g, rand, cam, place, time) {
   g.fillText('REC', W - 100, 38);
 
   const stamp = `09/24/2026  ${time}  VCPD-NET`;
-  g.font = '600 24px IBM Plex Mono';
+  g.font = '600 24px IBM Plex Mono, monospace';
   const tw = g.measureText(stamp).width;
   const box = { x: 20, y: H - 64, w: tw + 32, h: 44 };
   g.fillStyle = 'rgba(0,0,0,0.6)';
@@ -446,14 +449,17 @@ function cctv(g, rand, cam, place, time) {
 }
 
 const JASON = {
+  avatar: 'jason',
   skin: '#d9a47a', shirt: '#1f7a8c', flower: '#ff7eb6', pattern: 'hawaiian',
   pants: '#3a3a44', hair: '#3b2a1e', hairStyle: 'short', beard: true, cap: '#20202a',
 };
 const LUCIA = {
+  avatar: 'lucia',
   skin: '#b97a56', shirt: '#161622', pattern: 'plain', pants: '#26324f',
   hair: '#1c120c', hairStyle: 'long', earring: true, lips: '#a23a4a', tattoo: false,
 };
 const RICO = {
+  avatar: 'rico',
   skin: '#8a5a3c', shirt: '#f0f0f0', flower: '#c0392b', pattern: 'stripes',
   pants: '#111', hair: '#1a1a1a', hairStyle: 'none', beard: true, chain: true, glasses: true,
 };
@@ -532,9 +538,9 @@ function sceneCauseway(g, rand) {
   g.lineWidth = 4;
   g.stroke();
   g.fillStyle = '#fff';
-  g.font = '700 34px Montserrat';
+  g.font = '700 34px Montserrat, sans-serif';
   g.fillText('LEONIDA CAUSEWAY', 84, 158);
-  g.font = '600 26px Montserrat';
+  g.font = '600 26px Montserrat, sans-serif';
   g.fillText('VICE CITY  →  EXIT 5A', 84, 196);
   g.fillStyle = '#888';
   g.fillRect(240, 220, 12, 260);
@@ -566,7 +572,7 @@ function sceneBank(g, rand) {
   g.fillStyle = '#1d3c34';
   g.fillRect(420, 60, 440, 80);
   g.fillStyle = '#f5c542';
-  g.font = '44px Anton';
+  g.font = '44px Anton, sans-serif';
   g.textAlign = 'center';
   g.fillText('BANK OF LEONIDA', 640, 118);
   g.textAlign = 'left';
@@ -632,7 +638,7 @@ function sceneMarina(g, rand) {
   g.fillStyle = '#e0e0e0';
   g.fillRect(850, 280, 180, 50);
   g.fillStyle = '#10204a';
-  g.font = '700 30px Montserrat';
+  g.font = '700 30px Montserrat, sans-serif';
   g.fillText("RICO'S REVENGE", 820, 360);
   const ricoBoat = { x: 810, y: 326, w: 280, h: 46 };
 
@@ -651,7 +657,7 @@ function sceneMarina(g, rand) {
   g.fillStyle = 'rgba(40,120,180,0.7)';
   g.fillRect(175, 372, 230, 30);
   g.fillStyle = '#10204a';
-  g.font = '700 40px IBM Plex Mono';
+  g.font = '700 40px IBM Plex Mono, monospace';
   g.fillText('FL 4471 VC', 200, 480);
   const reg = { x: 190, y: 440, w: 280, h: 54 };
 
@@ -680,12 +686,12 @@ function sceneMarina(g, rand) {
     g.rotate((rand() - 0.5) * 0.8);
     g.fillRect(-20, -8, 40, 18);
     g.fillStyle = '#2e7d32';
-    g.font = '700 12px IBM Plex Mono';
+    g.font = '700 12px IBM Plex Mono, monospace';
     g.fillText('$100', -16, 6);
     g.restore();
   }
   g.fillStyle = '#f5c542';
-  g.font = '64px Anton';
+  g.font = '64px Anton, sans-serif';
   g.fillText('$', bx + 92, by + 86);
   const bag = { x: bx - 10, y: by - 50, w: 240, h: 164 };
   return { bag, reg, ricoBoat };
@@ -755,7 +761,7 @@ export const CASES = [
     camPlace: 'LEONIDA CAUSEWAY · EASTBOUND',
     time: '19:47:02',
     targets: (r) => [
-      { key: 'plate', kind: 'hide', label: 'Licence plate', rect: r.plate },
+      { key: 'plate', kind: 'hide', label: 'License plate', rect: r.plate },
       { key: 'face', kind: 'hide', label: "Lucia's face", rect: r.face },
     ],
   },
@@ -782,10 +788,11 @@ export const CASES = [
     place: 'Leonida Keys',
     seconds: 70,
     payout: 42000,
-    brief: 'Harbour patrol drone photo. The cash bag is on the dock and our boat reg is readable. Rico’s boat stays in shot.',
+    brief: 'Harbor patrol drone photo. The cash bag is on the dock and our boat reg is readable. Rico’s boat stays in shot.',
     draw: sceneMarina,
     cam: 'DRONE 2',
-    camPlace: 'HARBOUR PATROL · LEONIDA KEYS',
+    camPlace: 'HARBOR PATROL · LEONIDA KEYS',
+    stampLabel: 'Drone timestamp',
     time: '14:26:10',
     targets: (r) => [
       { key: 'bag', kind: 'hide', label: 'Duffel bag of cash', rect: r.bag },
@@ -807,7 +814,7 @@ export const CASES = [
     targets: (r) => [
       { key: 'jface', kind: 'hide', label: "Jason's face", rect: r.jface },
       { key: 'lface', kind: 'hide', label: "Lucia's face", rect: r.lface },
-      { key: 'plate', kind: 'hide', label: 'Licence plate', rect: r.plate },
+      { key: 'plate', kind: 'hide', label: 'License plate', rect: r.plate },
       { key: 'rico', kind: 'keep', label: "Rico's face (frame him)", rect: r.rico },
     ],
   },
@@ -830,13 +837,20 @@ export function renderCharacter(key, { blink = false, scale = 2.2 } = {}) {
 }
 
 export async function ensureFonts() {
-  await Promise.all([
+  // Font/CDN failures must not leave the start button disabled forever.
+  let timeout;
+  const fonts = Promise.allSettled([
     document.fonts.load('44px Anton'),
     document.fonts.load('600 22px "IBM Plex Mono"'),
     document.fonts.load('700 22px "IBM Plex Mono"'),
     document.fonts.load('700 30px Montserrat'),
     document.fonts.load('600 26px Montserrat'),
   ]);
+  await Promise.all([
+    loadAvatarArt(),
+    Promise.race([fonts, new Promise(resolve => { timeout = setTimeout(resolve, 5000); })]),
+  ]);
+  clearTimeout(timeout);
 }
 
 // Renders a case to a canvas. Returns { canvas, dataUrl, targets }.
@@ -850,7 +864,7 @@ export function renderCase(c, index) {
   const stamp = cctv(g, rand, c.cam, c.camPlace, c.time);
   const targets = [
     ...c.targets(rects),
-    { key: 'stamp', kind: 'keep', label: 'CCTV timestamp', rect: stamp },
+    { key: 'stamp', kind: 'keep', label: c.stampLabel ?? 'CCTV timestamp', rect: stamp },
   ].map((t) => ({ ...t, rect: clampRect(t.rect) }));
   return { canvas, dataUrl: canvas.toDataURL('image/png'), targets };
 }
