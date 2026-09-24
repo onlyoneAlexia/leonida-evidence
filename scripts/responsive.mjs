@@ -28,7 +28,7 @@ function editorDouble() {
         data = canvas.toDataURL();
       }
       reset();
-      return { getImage: () => data, reset, destroy: () => canvas.remove(), updateOptions: () => {}, hasChanges: () => true };
+      return { getImage: () => data, reset, destroy: () => canvas.remove(), updateOptions: () => {}, hasChanges: () => !window.__untouched };
     },
   };
 }
@@ -108,7 +108,7 @@ try {
       await check(`briefing ${i + 1}`);
       await page.locator('.brief-side').getByRole('button', { name: 'Roll tape', exact: true }).click();
       await page.getByRole('button', { name: /Freeze frame/ }).click();
-      await page.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'));
+      await page.waitForFunction(() => document.querySelector('.lab .timer')?.textContent.includes(':'));
       await check(`lab ${i + 1}`);
       // The Home dialog (with all three choices once a job is finished) fits and is easy to tap.
       if (i === 1) {
@@ -116,7 +116,14 @@ try {
         await check('Home dialog', 'dialog[open]');
         await page.getByRole('button', { name: 'Keep playing', exact: true }).click();
       }
-      await page.getByRole('button', { name: /Send to evidence/ }).click();
+      // The first lab sends an untouched still, so its warning dialog is checked too.
+      if (i === 0) {
+        await page.evaluate(() => { window.__untouched = true; });
+        await page.locator('.hud').getByRole('button', { name: /Send to evidence/ }).click();
+        await check('untouched dialog', 'dialog[open]');
+        await page.getByRole('button', { name: 'Send it anyway', exact: true }).click();
+        await page.evaluate(() => { window.__untouched = false; });
+      } else await page.locator('.hud').getByRole('button', { name: /Send to evidence/ }).click();
       await page.waitForSelector('.ledger');
       await check(`verdict ${i + 1}`);
       await page.locator('.verdict-body .btn.primary').click({ timeout: 5000 });

@@ -148,17 +148,20 @@ function person(g, who, st) {
   };
 }
 
-// A sprite from the manifest, bottom-centre at (cx, bottom), `w` wide.
-function sprite(g, name, cx, bottom, w, { alpha = 1 } = {}) {
+// A sprite from the manifest, bottom-centre at (cx, bottom), `w` wide; `flip` mirrors it left to right.
+// `part(fx, fy, fw, fh)` maps a box in sprite fractions to the screen, mirrored with the sprite.
+function sprite(g, name, cx, bottom, w, { alpha = 1, flip = false } = {}) {
   const a = ART[name];
   const h = (w * a.h) / a.w;
   const rect = { x: cx - w / 2, y: bottom - h, w, h };
   g.save();
   g.globalAlpha = alpha;
+  if (flip) { g.translate(2 * cx, 0); g.scale(-1, 1); }
   g.drawImage(IMG[name], rect.x, rect.y, w, h);
   g.restore();
-  const place = a.place && { x: rect.x + a.place.x * w, y: rect.y + a.place.y * h, w: a.place.w * w, h: a.place.h * h };
-  return { rect, place, depth: bottom };
+  const part = (fx, fy, fw, fh) => ({ x: rect.x + (flip ? 1 - fx - fw : fx) * w, y: rect.y + fy * h, w: fw * w, h: fh * h });
+  const place = a.place && part(a.place.x, a.place.y, a.place.w, a.place.h);
+  return { rect, place, part, depth: bottom };
 }
 
 // --- Light and motion effects. Lights add ('lighter') so they read as glare on the tape. ---
@@ -635,7 +638,9 @@ function sceneCauseway(g, t) {
   };
 }
 
-const BANK = { door: { x: 60, y: 470, s: 0.78 }, rico: { x: 1010, y: 650, s: 1.06 } };
+// Rico ends up at Jason's shoulder, his face a hand's width from Jason's: shapes, not spray. He stops a step nearer
+// the camera and never crosses behind Jason, so the two faces never touch.
+const BANK = { door: { x: 60, y: 470, s: 0.78 }, rico: { x: 353, y: 625, s: 1.02 } };
 
 function sceneBank(g, t) {
   g.drawImage(IMG['bg-bank'], 0, 0, W, H);
@@ -650,8 +655,8 @@ function sceneBank(g, t) {
   const slip = note(g, { x: 822, y: 290, w: 104, h: 40 }, [['DEPOSIT', 9], ['J. ACCT 0924', 10]]);
   const J = idle({ x: 430 + Math.sin(t * 0.8) * 4, y: 612, s: 1.0 }, t, 0.35);
   const L = idle({ x: 700, y: 640, s: 1.06, tattoo: true }, t + 1.4, 0.15);
-  // Rico strolls in from the side door and stops to face the room.
-  const R = t < 2.45 ? null : idle({ ...trip(t, 2.6, 9.4, BANK.door, BANK.rico, 'rico-walk'), alpha: seg(t, 2.45, 2.75), turn: seg(t, 9.45, 9.8) }, t, 0.2 * seg(t, 9.8, 10.2));
+  // Rico appears at the side door, sizes up the room, then sidles up to Jason and turns to face the room.
+  const R = t < 2.45 ? null : idle({ ...trip(t, 4.4, 8.6, BANK.door, BANK.rico, 'rico-walk'), alpha: seg(t, 2.45, 2.75), turn: seg(t, 8.65, 9.0) }, t, 0.2 * seg(t, 9.0, 9.4));
   const guard = t >= 5.4 && t < 10.6 ? trip(t, 5.4, 10.6, { x: 1420, y: 718, s: 1.4 }, { x: -170, y: 718, s: 1.4 }, 'guard-walk', steady) : null;
   const drawn = draw(g, [
     { depth: J.y, draw: () => as('jason', person(g, 'jason', J)) },
@@ -675,35 +680,40 @@ function sceneBank(g, t) {
   };
 }
 
+// A crop job: the drone timestamp is burned in bottom-left, so everything we need gone sits where a crop can reach it.
+// Our speedboat idles out on the water above where Rico's yacht moors (cut from the top), the bag waits on the dock
+// to the right of the yacht (cut from the right), and Rico's name stays inside the frame in between.
 function sceneMarina(g, t) {
   g.drawImage(IMG['bg-marina'], 0, 0, W, H);
   glints(g, t, { x: 0, y: 290, w: W, h: 290 }, 'rgba(255,255,255,0.5)', 70, 8);
+  // Rico's yacht motors in from the left and eases up alongside the dock.
   const yachtP = 1 - (1 - seg(t, 1.4, 6.6)) ** 2;
   const jetP = seg(t, 4.0, 7.4);
   const drawn = draw(g, [
-    { depth: 400, draw: () => {
-      const yacht = sprite(g, 'yacht-rival', lerp(1560, 930, yachtP), 402 + Math.sin(t * 1.3) * 2, 480);
-      return { name: letterIn(g, yacht.place, "RICO'S REVENGE", '#10204a'), body: yacht.rect };
-    } },
-    { depth: 585, draw: () => {
-      const boat = sprite(g, 'speedboat', 380, 585 + Math.sin(t * 1.7) * 4, 640);
+    { depth: 375, draw: () => {
+      const boat = sprite(g, 'speedboat', 300, 375 + Math.sin(t * 1.7) * 3, 520);
       return { reg: letterIn(g, boat.place, 'FL 4471 VC', '#10204a', 'IBM Plex Mono, monospace'), body: boat.rect };
     } },
+    { depth: 572, draw: () => {
+      const yacht = sprite(g, 'yacht-rival', lerp(-420, 600, yachtP), 572 + Math.sin(t * 1.3) * 2, 560, { flip: true });
+      // The hull and cabin block the view; the radar arch above them is mostly sky.
+      return { name: letterIn(g, yacht.place, "RICO'S REVENGE", '#10204a'), bodies: [yacht.part(0.02, 0.46, 0.97, 0.54), yacht.part(0.37, 0.3, 0.46, 0.16)] };
+    } },
     // The jet ski skips from wave to wave, nose bucking, throwing a rooster tail of spray.
-    jetP > 0 && jetP < 1 && { depth: 612, draw: () => {
+    jetP > 0 && jetP < 1 && { depth: 606, draw: () => {
       const x = lerp(-380, 1450, jetP), hop = Math.abs(Math.sin(t * 6.5)) * 12;
       const a = ART.jetski, w = 330, h = (w * a.h) / a.w;
-      kickup(g, t, x - w * 0.36, 600, 1, { n: 26, reach: 230, rise: 70, size: 7, alpha: 0.7, seed: 9 });
+      kickup(g, t, x - w * 0.36, 594, 1, { n: 26, reach: 230, rise: 70, size: 7, alpha: 0.7, seed: 9 });
       g.save();
-      g.translate(x, 612 - hop);
+      g.translate(x, 606 - hop);
       g.rotate(-Math.cos(t * 6.5) * 0.06);
       g.drawImage(IMG.jetski, -w / 2, -h, w, h);
       g.restore();
-      kickup(g, t, x + w * 0.2, 606, -1, { n: 10, reach: 50, rise: 26, size: 5, alpha: 0.6, seed: 12 });
-      return { body: { x: x - w / 2, y: 612 - hop - h, w, h: h + hop } };
+      kickup(g, t, x + w * 0.2, 600, -1, { n: 10, reach: 50, rise: 26, size: 5, alpha: 0.6, seed: 12 });
+      return { body: { x: x - w / 2, y: 606 - hop - h, w, h: h + hop } };
     } },
     { depth: 690, draw: () => {
-      const bag = sprite(g, 'duffel-cash', 880, 690, 250);
+      const bag = sprite(g, 'duffel-cash', 1060, 690, 240);
       const tag = note(g, { x: bag.rect.x + bag.rect.w * 0.74, y: bag.rect.y + bag.rect.h * 0.08, w: 52, h: 26 }, [['PROP. OF', 7], ['LUCIA', 8]], '#ffd23f');
       return { bag: pad(bag.rect, -8), tag, body: bag.rect };
     } },
@@ -721,10 +731,11 @@ function sceneMarina(g, t) {
   };
 }
 
+// Crowded on purpose: Rico stops to watch from right behind the crew, and his own car is parked at Lucia's elbow.
 const JEWELRY = {
   jason: { x: 360, y: 470, s: 0.82 }, lucia: { x: 470, y: 478, s: 0.84 },
   jcar: { x: 905, y: 668, s: 1.12 }, lcar: { x: 1080, y: 672, s: 1.12 },
-  rico: { x: 1340, y: 520, s: 0.9 }, ricoStop: { x: 760, y: 540, s: 0.92 },
+  rico: { x: 1340, y: 520, s: 0.9 }, ricoStop: { x: 1000, y: 530, s: 0.9 },
 };
 
 // Grabbing from the smashed window (a dip now and then), a turn, a dash to the car, then a nervous wait by it.
@@ -752,8 +763,8 @@ function sceneJewelry(g, t) {
   const light = heliIn && helicopter(g, t, lerp(1480, 1060, stroll(seg(t, 7.3, 9.0))), 112, 250, -1);
   const L = jewelryRunner(t, 5.3, lucia, lcar, 'lucia-run', 1.7);
   const J = jewelryRunner(t, 5.65, jason, jcar, 'jason-run', 0);
-  // Rico strolls up the sidewalk from the right while the crew run, then stops to watch.
-  const R = t < 4.5 ? null : idle({ ...trip(t, 4.5, 8.4, rico, ricoStop, 'rico-walk'), turn: seg(t, 8.45, 8.8) }, t, 0.15 * seg(t, 8.8, 9.2));
+  // Rico strolls up the sidewalk from the right while the crew run, then stops to watch over their shoulders.
+  const R = t < 5.2 ? null : idle({ ...trip(t, 5.2, 8.4, rico, ricoStop, 'rico-walk'), turn: seg(t, 8.45, 8.8) }, t, 0.15 * seg(t, 8.8, 9.2));
   const photo = touristPhoto(t);
   const tourist = { x: 590, y: 560, s: 0.95, sheet: 'tourist-photo', frame: photo.frame };
   const busP = seg(t, 5.8, 8.0);
@@ -765,6 +776,10 @@ function sceneJewelry(g, t) {
     { depth: J.y, draw: () => as('jason', person(g, 'jason', J)) },
     { depth: L.y, draw: () => as('lucia', person(g, 'lucia', L)) },
     R && { depth: R.y, draw: () => as('rico', person(g, 'rico', R)) },
+    { depth: 500, draw: () => {
+      const car = sprite(g, 'car-purple-rear', 1170, 500, 250);
+      return { ricoPlate: plateIn(g, car.place, 'R1CO 77'), body: car.rect };
+    } },
     { depth: 708, draw: () => {
       const car = sprite(g, 'car-red-rear', 1000, 708, 380);
       return { plate: plateIn(g, car.place, 'VC 2HOT'), body: car.rect };
@@ -796,6 +811,7 @@ function sceneJewelry(g, t) {
       jface: face('jason'),
       lface: face('lucia'),
       plate: { rect: pick('plate').plate, depth: pick('plate').depth },
+      ricoPlate: { rect: pick('ricoPlate').ricoPlate, depth: pick('ricoPlate').depth },
       rico: face('rico'),
       tourist: face('tourist'),
       card: { rect: card, depth: 638 },
@@ -810,6 +826,9 @@ function sceneJewelry(g, t) {
 
 // Clocks shrink as the jobs get bigger; the tape's running time counts against the clock.
 // `cues` are the tape's sound moments, played by sound.cue(name) as the tape reaches them.
+// `toolkit.tools` are the only editor tools the job allows ('crop', 'filter', 'draw', 'text', 'shapes', 'stickers'), so
+// each job leans on a different part of the editor; every target and surprise can be hidden with them at any freeze.
+// A `text` KEEP is lettering (the timestamp, a boat name, a plate): flipped, turned or tilted, it no longer reads true.
 export const CASES = [
   {
     id: 'kwik',
@@ -826,6 +845,7 @@ export const CASES = [
     camPlace: 'KWIK MART #117 · VICE BEACH',
     time: '02:13:44',
     cues: [{ at: 2.2, name: 'siren' }, { at: 2.75, name: 'screech' }, { at: 3.1, name: 'rotor' }],
+    toolkit: { tools: ['draw', 'shapes'], label: 'Spray and Blocks', why: 'Rookie kit from the glovebox: a can of spray paint and a roll of tape.' },
     targets: r => [
       { key: 'face', kind: 'hide', label: "Jason's face", at: r.face },
       { key: 'plate', kind: 'hide', label: 'Getaway car plate', at: r.plate },
@@ -847,6 +867,7 @@ export const CASES = [
     camPlace: 'LEONIDA CAUSEWAY · EASTBOUND',
     time: '19:47:02',
     cues: [{ at: 2.0, name: 'siren' }, { at: 4.5, name: 'horn' }, { at: 4.9, name: 'rumble' }],
+    toolkit: { tools: ['stickers'], label: 'Cover-ups only', why: 'The paint shop is closed. Slap stickers on it.' },
     targets: r => [
       { key: 'plate', kind: 'hide', label: 'License plate', at: r.plate },
       { key: 'face', kind: 'hide', label: "Lucia's face", at: r.face },
@@ -862,12 +883,13 @@ export const CASES = [
     clip: 12,
     preview: 11,
     brief: "Lobby cam. Rico's crew was casing the same bank. Scrub Jason, lose Lucia's tattoo, and leave Rico's face for the cops.",
-    tip: 'Rico walks in late, and a guard crosses the lobby. Freeze after Rico is in the shot.',
+    tip: 'Rico walks in late and sidles up to Jason while a guard crosses the lobby. Freeze once Rico is in the shot.',
     draw: sceneBank,
     cam: 'CAM 11',
     camPlace: 'BANK OF LEONIDA · LOBBY',
     time: '10:02:31',
     cues: [{ at: 8.2, name: 'alarm' }],
+    toolkit: { tools: ['shapes'], label: 'Blocks only', why: "Bank cams flag spray residue. Clean-cut shapes only, and keep them off Rico's face." },
     targets: r => [
       { key: 'jface', kind: 'hide', label: "Jason's face", at: r.jface },
       { key: 'tattoo', kind: 'hide', label: "Lucia's L+J tattoo", at: r.tattoo },
@@ -884,17 +906,18 @@ export const CASES = [
     clip: 12,
     preview: 8,
     brief: 'Harbor patrol drone. The cash bag is on the dock and our boat registration is readable. Rico’s yacht has to be in the shot.',
-    tip: 'Wait for Rico’s yacht to pull in. A jet ski screams past our hull.',
+    tip: 'Wait for Rico’s yacht to pull in, then trim our boat off the top and the bag off the side. Keep the timestamp.',
     draw: sceneMarina,
     cam: 'DRONE 2',
     camPlace: 'HARBOR PATROL · LEONIDA KEYS',
     stampLabel: 'Drone timestamp',
     time: '14:26:10',
     cues: [{ at: 3.9, name: 'jetski' }, { at: 6.2, name: 'horn' }],
+    toolkit: { tools: ['crop', 'filter'], label: 'Cut and Tint', why: 'Harbor patrol scans drone stills for paint. Trim the evidence out of the frame instead.' },
     targets: r => [
       { key: 'bag', kind: 'hide', label: 'Duffel bag of cash', at: r.bag },
       { key: 'reg', kind: 'hide', label: 'Boat registration', at: r.reg },
-      { key: 'ricoBoat', kind: 'keep', mustShow: true, label: "Rico's boat name", at: r.ricoBoat },
+      { key: 'ricoBoat', kind: 'keep', mustShow: true, text: true, label: "Rico's boat name", at: r.ricoBoat },
     ],
     surprise: r => ({ key: 'tag', kind: 'hide', label: "Lucia's name tag on the duffel", at: r.tag }),
   },
@@ -906,7 +929,7 @@ export const CASES = [
     payout: 75000,
     clip: 12,
     preview: 10,
-    brief: 'The big one. Street cam saw everything. Erase the crew and the plate, frame Rico, and leave the tourist alone.',
+    brief: 'The big one. Street cam saw everything. Erase the crew and our plate, frame Rico and his car, and leave the tourist alone.',
     tip: 'A bus sweeps the street while the crew run for the car. Wait for Rico to come up the sidewalk first.',
     draw: sceneJewelry,
     cam: 'CAM 22',
@@ -916,11 +939,13 @@ export const CASES = [
       { at: 0.05, name: 'alarm' }, { at: 2.2, name: 'flash' }, { at: 2.7, name: 'siren' }, { at: 3.3, name: 'screech' },
       { at: 5.5, name: 'flash' }, { at: 5.9, name: 'rumble' }, { at: 7.2, name: 'rotor' }, { at: 8.8, name: 'flash' },
     ],
+    toolkit: { tools: ['crop', 'filter', 'draw', 'text', 'shapes', 'stickers'], label: 'Full kit', why: 'Everything you have, but the street is full of faces and plates the cops need.' },
     targets: r => [
       { key: 'jface', kind: 'hide', label: "Jason's face", at: r.jface },
       { key: 'lface', kind: 'hide', label: "Lucia's face", at: r.lface },
       { key: 'plate', kind: 'hide', label: 'License plate', at: r.plate },
       { key: 'rico', kind: 'keep', mustShow: true, label: "Rico's face (frame him)", at: r.rico },
+      { key: 'ricoPlate', kind: 'keep', text: true, label: "Rico's plate (frame him)", at: r.ricoPlate },
       { key: 'tourist', kind: 'keep', label: "Tourist's face (innocent)", at: r.tourist },
     ],
     surprise: r => ({ key: 'card', kind: 'hide', label: "Jason's dropped ID card", at: r.card }),
@@ -1107,7 +1132,7 @@ export function renderCase(c, index, t = c.preview) {
   const g = canvas.getContext('2d', { willReadFrequently: true });
   const f = frame(g, c, t);
   const stampRect = cctvStill(g, rng(1000 + index * 77), c, t);
-  const targets = [...f.targets, { key: 'stamp', kind: 'keep', label: c.stampLabel ?? 'CCTV timestamp', rect: stampRect }]
+  const targets = [...f.targets, { key: 'stamp', kind: 'keep', text: true, label: c.stampLabel ?? 'CCTV timestamp', rect: stampRect }]
     .map(x => ({ ...x, rect: clampRect(x.rect) }));
   return { canvas, dataUrl: canvas.toDataURL('image/png'), targets, gone: f.gone, missing: f.missing, surprise: f.surprise && { ...f.surprise, rect: clampRect(f.surprise.rect) }, t };
 }

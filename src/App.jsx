@@ -9,21 +9,67 @@ import * as sound from './sound.js';
 import { boardRows, postRun, useLeaderboard } from './leaderboard.js';
 import Home from './Home.jsx';
 import LeaderboardTable from './LeaderboardTable.jsx';
+import PosterStudio, { SharePoster } from './PosterStudio.jsx';
 import './App.css';
 
 const MAX_STARS = 5;
 
-// Resize and frame change the output size/framing; everything else is fair game.
-// The Unlayer project id unlocks the AI Assistant ("the AI fixer").
+// The editor's tools, renamed for the fiction. Resize and frame change the output size/framing, so they stay off.
+const TOOLS = ['crop', 'filter', 'draw', 'text', 'shapes', 'stickers'];
+const TOOL_LABELS = { crop: 'Cut', filter: 'Tint', draw: 'Spray', text: 'Caption', shapes: 'Blocks', stickers: 'Cover-ups' };
+// Drawn for a 21px rail slot: currentColor follows the editor's hover/active states, the neon accents don't.
+const icon = body => `<svg class="ler-tool-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${body}</svg>`;
+const TOOL_ICONS = {
+  crop: icon('<path d="M6.5 2v13.5a2 2 0 0 0 2 2H22" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><path d="M2 6.5h13.5a2 2 0 0 1 2 2V22" fill="none" stroke="#ff4fd8" stroke-width="2.6" stroke-linecap="round"/><path d="m9.5 14.5 5-5" stroke="#ffd23f" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="1.5 2"/>'),
+  filter: icon('<path d="M7 8.5a5 5 0 0 1 10 0z" fill="#ffd23f"/><path d="M1.5 9.5h21" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><path d="M2.6 9.5h8.6v2.9a5 5 0 0 1-5 5h-.4a3.2 3.2 0 0 1-3.2-3.2z" fill="#ff8a3d" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M21.4 9.5h-8.6v2.9a5 5 0 0 0 5 5h.4a3.2 3.2 0 0 0 3.2-3.2z" fill="#ff4fd8" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4.8 13l2.2-1.7m9.6 1.7 2.2-1.7" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/>'),
+  draw: icon('<rect x="3.5" y="9" width="9.5" height="13" rx="2.2" fill="currentColor"/><rect x="3.5" y="13" width="9.5" height="3.6" fill="#ff4fd8"/><path d="M5.6 9V7a1.4 1.4 0 0 1 1.4-1.4h2.5A1.4 1.4 0 0 1 10.9 7v2z" fill="currentColor"/><rect x="7.2" y="2.4" width="2.2" height="3.2" rx=".6" fill="currentColor"/><circle cx="13" cy="3.4" r="1.1" fill="#ff4fd8"/><circle cx="16.4" cy="2.4" r="1" fill="#ff8a3d"/><circle cx="16.2" cy="5.7" r="1.4" fill="#ff4fd8"/><circle cx="20" cy="4.2" r="1.1" fill="#ffd23f"/><circle cx="19.8" cy="8" r="1.3" fill="#ff8a3d"/><circle cx="15.4" cy="9.2" r=".9" fill="#ffd23f"/>'),
+  text: icon('<path d="M4 2.5h16v4.4h-2.7V5.3h-3.9v11.9h2.4V20H8.2v-2.8h2.4V5.3H6.7v1.6H4z" fill="currentColor"/><path d="M3 22.3h18" stroke="#29e7ff" stroke-width="2.2" stroke-linecap="round"/>'),
+  shapes: icon('<rect x="2" y="8.5" width="12.5" height="12.5" rx="1.6" fill="currentColor"/><circle cx="16" cy="8" r="6.2" fill="#29e7ff" stroke="#1f2937" stroke-width="1.6"/><path d="M15 21.5l3.3-6 3.3 6z" fill="#ff4fd8"/>'),
+  stickers: icon('<path d="M5 2.5h14A2.5 2.5 0 0 1 21.5 5v9.3l-7.2 7.2H5A2.5 2.5 0 0 1 2.5 19V5A2.5 2.5 0 0 1 5 2.5z" fill="currentColor"/><path d="M14.3 21.5v-4.7a2.5 2.5 0 0 1 2.5-2.5h4.7z" fill="#ff4fd8"/><path d="m11 5.2 1.5 3 3.3.5-2.4 2.3.6 3.3-3-1.6-3 1.6.6-3.3-2.4-2.3 3.3-.5z" fill="#22143a"/>'),
+};
+// Tools that can put evidence out of sight. Crop only reaches the edges, so the paint-over tools matter most.
+const PAINTS = ['draw', 'shapes', 'stickers'];
+const COVERS = [...PAINTS, 'crop'];
+// A job's toolkit (scenes.js) lists the only tools it allows; jobs without one get the full kit.
+const kitOf = c => (c.toolkit?.tools?.length ? TOOLS.filter(t => c.toolkit.tools.includes(t)) : TOOLS);
+// Heat jams one toolkit tool at three stars and another at four, stickers first. It never jams a job's last way to
+// cover evidence, nor its last paint-over tool, so every job stays solvable; with nothing left to jam, heat only shakes and wails.
+const JAM_ORDER = ['stickers', 'shapes', 'draw', 'text', 'filter', 'crop'];
+function jammedTools(kit, stars) {
+  const jammed = [];
+  const jams = (stars >= 3) + (stars >= 4);
+  for (const tool of JAM_ORDER) {
+    if (jammed.length >= jams) break;
+    const left = kit.filter(t => t !== tool && !jammed.includes(t));
+    if (kit.includes(tool) && left.some(t => COVERS.includes(t)) && (!kit.some(t => PAINTS.includes(t)) || left.some(t => PAINTS.includes(t)))) jammed.push(tool);
+  }
+  return jammed;
+}
+
+// The Unlayer project id unlocks the AI Assistant ("the AI fixer") where the project is entitled to it.
+// Translations are the only labels that can change without remounting; these keys come from @unlayer/types.
 const EDITOR_OPTIONS = {
   theme: 'dark',
   projectId: 289605,
   aiAssistantOpenState: 'open',
-  features: {
-    ai: { enabled: true, assistant: true },
-    imageEditor: { tools: { resize: false, frame: false } },
+  features: { ai: { enabled: true, assistant: true } },
+  translations: {
+    en: {
+      ...Object.fromEntries(TOOLS.map(t => [`image_editor.tools.${t}`, TOOL_LABELS[t]])),
+      'image_editor.toolbar.save': 'Send to evidence',
+      'image_editor.toolbar.cancel': 'Reset tape',
+    },
   },
 };
+
+// Built once per lab: `features` is a remount-tier option, so changing tools mid-edit would discard the player's work.
+function editorOptions(c, stars) {
+  const kit = kitOf(c);
+  const jammed = jammedTools(kit, stars);
+  const tools = { resize: false, frame: false };
+  for (const t of TOOLS) tools[t] = { enabled: kit.includes(t) && !jammed.includes(t), icon: TOOL_ICONS[t] };
+  return { ...EDITOR_OPTIONS, features: { ...EDITOR_OPTIONS.features, imageEditor: { tools } } };
+}
 
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
 const calm = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -163,17 +209,36 @@ const forensicLabel = (r) => (r.kind === 'hide' ? (r.pass ? 'CLEAN' : 'MATCH') :
 const clock = s => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
 
 // Heat pressure: every wanted star makes the next tape harder.
-const heatEffects = stars => [
+const heatEffects = (stars, c) => [
   stars >= 1 && 'Sirens',
   stars >= 2 && 'Camera shake',
-  stars >= 3 && 'Stickers jammed',
-  stars >= 4 && 'Shapes jammed',
+  ...jammedTools(kitOf(c), stars).map(t => `${TOOL_LABELS[t]} jammed`),
 ].filter(Boolean);
 
-function HeatChips({ stars }) {
-  const effects = heatEffects(stars);
+function HeatChips({ stars, c }) {
+  const effects = heatEffects(stars, c);
   if (!effects.length) return null;
   return <p className="heat-chips" aria-label={`Heat effects: ${effects.join(', ')}`}>{effects.map(e => <span key={e}>{e}</span>)}</p>;
+}
+
+// The job's toolkit, shown before the tape rolls and in the lab's orders, with any tool the heat has jammed.
+function Toolkit({ c, stars }) {
+  if (!c.toolkit?.tools?.length) return null;
+  const kit = kitOf(c);
+  const jammed = jammedTools(kit, stars);
+  return (
+    <div className="toolkit">
+      <p className="toolkit-head"><b>Toolkit</b><span>{c.toolkit.label}</span></p>
+      {c.toolkit.why && <p className="toolkit-why">{c.toolkit.why}</p>}
+      <ul className="toolkit-tools" aria-label="Tools for this job">
+        {kit.map(t => (
+          <li key={t} className={jammed.includes(t) ? 'jammed' : undefined}>
+            <i aria-hidden="true" dangerouslySetInnerHTML={{ __html: TOOL_ICONS[t] }} />{TOOL_LABELS[t]}{jammed.includes(t) && <em> jammed</em>}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 const liveStatus = t => (t.inShot ? 'in shot' : t.kind === 'keep' && t.mustShow ? 'not in shot' : 'out of sight');
@@ -282,7 +347,8 @@ function Feed({ index, c, stars, cash, onFreeze, home }) {
                 </li>
               ))}
             </ul>
-            <HeatChips stars={stars} />
+            <Toolkit c={c} stars={stars} />
+            <HeatChips stars={stars} c={c} />
             <p className="clock">⏱ {clock(c.seconds - Math.floor(live.t))} on the clock · payout up to {money(c.payout)}</p>
             {rolling ? <button className="btn primary freeze" onClick={freeze}>Freeze frame <kbd>Space</kbd></button>
               : <button className="btn primary" onClick={roll} disabled={done}>{done ? 'Frame frozen' : 'Roll tape'}</button>}
@@ -349,6 +415,23 @@ const SURPRISE_AFTER = 6000;
 const SURPRISE_BONUS = 5;
 const SHAKE_EVERY = 13000;
 
+const TOOL_TIPS = {
+  draw: 'paint over a face or plate.',
+  shapes: 'drop a solid block over it.',
+  stickers: 'slap something on it. Covered is covered.',
+  text: "the Highlight style's solid background covers what's under it.",
+  crop: 'cut evidence off the edge, but the timestamp must survive.',
+  filter: 'a colour grade is fine, but blur hits the whole frame. Forensics will notice.',
+};
+
+// Why the lab stopped. Load failures unmount the editor and reload it; a failed export keeps it, and the edits, mounted.
+const PROBLEMS = {
+  embed: ["The photo lab couldn't reach Unlayer's image editor. Check your connection and reload the lab.", 'Reload the lab'],
+  stalled: ['The photo lab is taking too long to load. Check your connection and reload the lab.', 'Reload the lab'],
+  image: ["The frozen still wouldn't load into the editor. Reload it and try again.", 'Reload the still'],
+  export: ["Your still didn't make it to evidence. Your edits are safe in the lab, so send it again.", 'Try sending again'],
+};
+
 function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
   const editorRef = useRef(null);
   const [left, setLeft] = useState(budget);
@@ -356,13 +439,14 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
   const [shaking, setShaking] = useState(false);
   // The frozen frame tears apart as the lab cuts in.
   const [cut, setCut] = useState(() => !calm());
-  const options = useMemo(() => ({
-    ...EDITOR_OPTIONS,
-    features: { ...EDITOR_OPTIONS.features, imageEditor: { tools: { ...EDITOR_OPTIONS.features.imageEditor.tools, ...(stars >= 3 && { stickers: false }), ...(stars >= 4 && { shapes: false }) } } },
-  }), [stars]);
+  const options = useMemo(() => editorOptions(c, stars), [c, stars]);
+  const usable = useMemo(() => TOOLS.filter(t => options.features.imageEditor.tools[t].enabled), [options]);
   const targets = useMemo(() => (revealed ? [...still.targets, still.surprise] : still.targets), [revealed, still]);
   const [ready, setReady] = useState(false);
-  const [error, setError] = useState('');
+  const [problem, setProblem] = useState(null);
+  const loadFailed = !!problem && problem !== 'export';
+  // The clock only runs while the player can actually edit.
+  const running = ready && !problem;
   const [editorAttempt, setEditorAttempt] = useState(0);
   const [mountedEditor, setMountedEditor] = useState(null);
   const [ordersOpen, setOrdersOpen] = useState(() => window.innerWidth > 900);
@@ -371,39 +455,45 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
   const [expanded, setExpanded] = useState(false);
   const labRef = useRef(null);
   const wrapRef = useRef(null);
+  const untouchedDialog = useRef(null);
+  const resetDialog = useRef(null);
   const done = useRef(false);
+  // "Send it untouched?" asks once per lab; `pending` is the hand-in it paused.
+  const warned = useRef(false);
+  const pending = useRef(null);
+  const failedReason = useRef('submit');
   const remaining = useRef(budget);
   const deadline = useRef(0);
   const readyAt = useRef(0);
   const revealedRef = useRef(false);
 
-  const failEditor = useCallback(() => {
+  const failEditor = useCallback((kind) => {
     setReady(false);
     setMountedEditor(null);
-    setError('The image editor could not load. Check your connection and try again. Your timer is paused.');
+    setProblem(kind);
   }, []);
 
   useEffect(() => {
-    if (ready || error) return;
-    const timeout = setTimeout(failEditor, 25000);
+    if (ready || problem) return;
+    const timeout = setTimeout(() => failEditor('stalled'), 25000);
     return () => clearTimeout(timeout);
-  }, [ready, error, editorAttempt, failEditor]);
+  }, [ready, problem, editorAttempt, failEditor]);
 
   // Unlayer's mount callback can precede image decoding and canvas creation.
   useEffect(() => {
-    if (!mountedEditor || ready || error) return;
+    if (!mountedEditor || ready || problem) return;
     const check = () => {
       try { if (mountedEditor.getImage()) setReady(true); }
-      catch { failEditor(); }
+      catch { failEditor('image'); }
     };
     check();
     const poll = setInterval(check, 150);
     return () => clearInterval(poll);
-  }, [mountedEditor, ready, error, failEditor]);
+  }, [mountedEditor, ready, problem, failEditor]);
 
   const retryEditor = () => {
     done.current = false;
-    setError('');
+    setProblem(null);
     setReady(false);
     setMountedEditor(null);
     setEditorAttempt(n => n + 1);
@@ -414,14 +504,7 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
   useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) return;
-    const sync = () => {
-      setHasToolSettings(!!wrap.querySelector('[data-testid="native-tool-options"]'));
-      // Send to evidence is the only hand-in: the editor's own Save would submit early
-      // and its Cancel would silently wipe the tape. They have no test ids, so match the label.
-      for (const button of wrap.querySelectorAll('button:not([data-testid])')) {
-        if (/^(Save|Cancel)$/.test(button.textContent.trim())) button.style.display = 'none';
-      }
-    };
+    const sync = () => setHasToolSettings(!!wrap.querySelector('[data-testid="native-tool-options"]'));
     const observer = new MutationObserver(sync);
     observer.observe(wrap, { childList: true, subtree: true });
     sync();
@@ -455,30 +538,54 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
     }
   };
 
+  // Every hand-in comes through here exactly once: Send to evidence, the editor's own Save (with its export) and the countdown.
   const submit = useCallback(
     async (dataUrl, reason) => {
       if (done.current) return;
       done.current = true;
+      const editor = editorRef.current?.editor;
       try {
+        // The editor's Save applies an open crop or filter itself; the other paths close the panel first.
         if (!dataUrl) await commitToolPanel(wrapRef.current);
-        const img = dataUrl ?? editorRef.current?.editor?.getImage();
+        // An untouched still can still win when every HIDE is out of sight, so only ask when there is something to hide.
+        if (reason !== 'timeout' && !warned.current && targets.some(t => t.kind === 'hide') && editor?.hasChanges?.() === false) {
+          warned.current = true;
+          done.current = false;
+          pending.current = { dataUrl, reason };
+          untouchedDialog.current?.showModal();
+          return;
+        }
+        const img = dataUrl ?? editor?.getImage();
         if (!img) throw new Error('No image available');
         play('shutter');
         onSubmit(img, left, reason, targets);
       } catch {
         done.current = false;
-        setReady(false);
-        setError('Your edit could not be exported. Retry the editor to reload this tape. Your timer is paused.');
+        failedReason.current = reason;
+        setProblem('export');
       }
     },
     [left, onSubmit, targets],
   );
 
+  const resend = () => { setProblem(null); submit(null, failedReason.current); };
+
+  // The editor's Cancel is relabelled Reset tape; it asks before wiping any edits.
+  const resetTape = async () => {
+    const editor = editorRef.current?.editor;
+    setReady(false);
+    setMountedEditor(null);
+    try { await editor?.reset(still.dataUrl); setMountedEditor(editor); }
+    catch { failEditor('image'); }
+  };
+
   useEffect(() => {
-    if (!ready) return;
+    if (!running) return;
     deadline.current = Date.now() + remaining.current * 1000;
-    readyAt.current ||= Date.now();
-    if (stars >= 1) siren();
+    if (!readyAt.current) {
+      readyAt.current = Date.now();
+      if (stars >= 1) siren();
+    }
     const tick = () => {
       // The surprise lands a few seconds into the edit, with bonus time that never exceeds this tape's budget.
       if (still.surprise && !revealedRef.current && Date.now() - readyAt.current >= SURPRISE_AFTER) {
@@ -493,24 +600,24 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
     const t = setInterval(tick, 250);
     document.addEventListener('visibilitychange', tick);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
-  }, [ready, stars, still.surprise, budget]);
+  }, [running, stars, still.surprise, budget]);
 
   // Two or more stars: the camera jolts every few seconds.
   useEffect(() => {
-    if (!ready || stars < 2) return;
+    if (!running || stars < 2) return;
     let off;
     const jolt = setInterval(() => { setShaking(true); off = setTimeout(() => setShaking(false), 450); }, SHAKE_EVERY);
     return () => { clearInterval(jolt); clearTimeout(off); };
-  }, [ready, stars]);
+  }, [running, stars]);
 
   useEffect(() => {
-    if (ready && left === 0) submit(null, 'timeout');
-  }, [left, ready, submit]);
+    if (running && left === 0) submit(null, 'timeout');
+  }, [left, running, submit]);
 
   // One tick a second through the final countdown.
   useEffect(() => {
-    if (ready && left > 0 && left <= 10) play('tick');
-  }, [left, ready]);
+    if (running && left > 0 && left <= 10) play('tick');
+  }, [left, running]);
 
   const hurry = left <= 10;
   return (
@@ -526,7 +633,7 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
         <div className={`timer ${hurry ? 'hurry' : ''}`}>
           {ready ? `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : '…'}
         </div>
-        <button className="btn primary" onClick={() => submit(null, 'submit')} disabled={!ready}>
+        <button className="btn primary" onClick={() => submit(null, 'submit')} disabled={!running}>
           Send to evidence →
         </button>
       </div>
@@ -543,28 +650,31 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
         <aside id="lab-orders" className="lab-side" hidden={!ordersOpen || expanded}>
           <h3>Orders</h3>
           <ObjectiveList targets={targets} gone={still.gone} missing={still.missing} fresh={revealed ? still.surprise.key : null} />
-          <HeatChips stars={stars} />
+          <Toolkit c={c} stars={stars} />
+          <HeatChips stars={stars} c={c} />
           <div className="mini">
             <img src={still.dataUrl} alt="" />
             <TargetBoxes targets={targets} />
           </div>
           <h3>Fixer tips</h3>
           <ul className="tips">
-            <li><b>Draw</b> or <b>Shapes</b>: paint over a face or plate.</li>
-            <li><b>Stickers</b>: slap something on it. Covered is covered.</li>
-            <li><b>Crop</b>: cut evidence out, but the timestamp must survive.</li>
-            <li><b>Filter → blur</b> hits the whole frame. Forensics will notice.</li>
+            {['draw', 'shapes', 'stickers', 'text', 'crop', 'filter'].filter(t => usable.includes(t)).map(t => <li key={t}><b>{TOOL_LABELS[t]}</b>: {TOOL_TIPS[t]}</li>)}
           </ul>
         </aside>
         <div className={`editor-wrap ${toolsCollapsed ? 'tools-collapsed' : ''}`} ref={wrapRef} onClickCapture={event => {
           // Clicking a tool reopens its settings without recreating the editor.
           if (event.target.closest('[data-testid="native-tool-nav"] button')) setToolsCollapsed(false);
         }}>
-          {!ready && <div className="editor-status" role={error ? 'alert' : 'status'}>
-            <p>{error || 'Loading your photo lab. The clock starts when the editor is ready.'}</p>
-            {error && <button className="btn primary" onClick={retryEditor}>Retry editor (resets tape)</button>}
+          {(!ready || problem) && <div className={`editor-status ${problem === 'export' ? 'kept' : ''}`} role={problem ? 'alert' : 'status'}>
+            <p>{problem ? `${PROBLEMS[problem][0]} Your timer is paused.` : 'Loading your photo lab. The clock starts when the editor is ready.'}</p>
+            {problem === 'export' ? (
+              <div className="actions">
+                <button className="btn primary" onClick={resend}>{PROBLEMS.export[1]}</button>
+                <button className="btn" onClick={retryEditor}>Reload the still (loses edits)</button>
+              </div>
+            ) : problem && <button className="btn primary" onClick={retryEditor}>{PROBLEMS[problem][1]}</button>}
           </div>}
-          {!error && <ImageEditor
+          {!loadFailed && <ImageEditor
             key={editorAttempt}
             ref={editorRef}
             image={still.dataUrl}
@@ -572,18 +682,28 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
             minHeight={0}
             onLoad={setMountedEditor}
             onSave={({ dataUrl }) => submit(dataUrl, 'save')}
-            onCancel={async () => {
-              const editor = editorRef.current?.editor;
-              setReady(false);
-              setMountedEditor(null);
-              try { await editor?.reset(still.dataUrl); setMountedEditor(editor); }
-              catch { failEditor(); }
-            }}
-            onError={failEditor}
-            onLoadError={failEditor}
+            onCancel={() => { if (editorRef.current?.editor?.hasChanges?.() !== false) resetDialog.current?.showModal(); }}
+            onError={() => failEditor('embed')}
+            onLoadError={() => failEditor('image')}
           />}
         </div>
       </div>
+      <dialog ref={untouchedDialog} className="home-dialog lab-dialog" aria-labelledby="untouched-title">
+        <h3 id="untouched-title">Send it untouched?</h3>
+        <p>You haven't touched this still. Forensics will see the evidence exactly as the camera caught it.</p>
+        <form method="dialog" className="actions">
+          <button className="btn" autoFocus>Keep editing</button>
+          <button className="btn primary" onClick={() => { const { dataUrl, reason } = pending.current; submit(dataUrl, reason); }}>Send it anyway</button>
+        </form>
+      </dialog>
+      <dialog ref={resetDialog} className="home-dialog lab-dialog" aria-labelledby="reset-title">
+        <h3 id="reset-title">Reset the tape?</h3>
+        <p>This wipes every edit and puts the original still back in the editor.</p>
+        <form method="dialog" className="actions">
+          <button className="btn" autoFocus>Keep my edits</button>
+          <button className="btn primary" onClick={resetTape}>Reset tape</button>
+        </form>
+      </dialog>
       {cut && <div className="lab-cut" aria-hidden="true" style={{ backgroundImage: `url(${still.dataUrl})` }} onAnimationEnd={event => { if (event.target === event.currentTarget) setCut(false); }} />}
     </div>
   );
@@ -603,6 +723,10 @@ function Verdict({ index, entry, stars, cash, onNext, home }) {
   const allHidden = results.filter((r) => r.kind === 'hide').every((r) => r.pass);
   const clean = results.every((r) => r.pass);
   const busted = stars >= MAX_STARS;
+  // Older entries and the editor double have no transform; treat them as untouched.
+  const tf = analysis.transform ?? { flipX: false, flipY: false, rotate: 0, angle: 0 };
+  const quarter = tf.rotate === 90 || tf.rotate === 270;
+  const turned = [tf.flipX && 'flipped', tf.flipY && 'flipped upside down', tf.rotate && `turned ${tf.rotate}°`, tf.angle && `tilted ${Math.abs(tf.angle)}°`].filter(Boolean).join(' and ');
   // A bust is stamped across the photo, so the headline can still say what forensics found.
   const headline = clean ? 'CASE DISMISSED' : allHidden ? 'TAMPERING SUSPECTED' : 'EVIDENCE LEAKED';
 
@@ -641,6 +765,11 @@ function Verdict({ index, entry, stars, cash, onNext, home }) {
                 top: `${(analysis.offset.oy / H) * 100}%`,
                 width: `${(analysis.size.w / W) * 100}%`,
                 height: `${(analysis.size.h / H) * 100}%`,
+                // A flipped, turned or tilted export is shown the way it was handed in, over the spot it came from.
+                ...(quarter && { width: `${(analysis.size.h / W) * 100}%`, height: `${(analysis.size.w / H) * 100}%`, transform: `translate(${((analysis.size.w - analysis.size.h) / 2 / W) * 100}cqw, ${((analysis.size.h - analysis.size.w) / 2 / W) * 100}cqw) rotate(${tf.rotate}deg)` }),
+                ...(!quarter && tf.rotate === 180 && { transform: 'rotate(180deg)' }),
+                ...(tf.flipX && { transform: `${quarter || tf.rotate === 180 ? 'rotate(180deg) ' : ''}scaleX(-1)` }),
+                ...(tf.flipY && { transform: 'scaleY(-1)' }),
               }}
             />
             {!scanning && <>
@@ -668,6 +797,7 @@ function Verdict({ index, entry, stars, cash, onNext, home }) {
               <>
                 <p className={`stamp-text slam ${clean ? 'good' : 'bad'}`}>{headline}</p>
                 {entry.reason === 'timeout' && <p className="note">Time ran out. The tape went in as-is.</p>}
+                {turned && <p className="note">The still came in {turned}. Forensics read it that way, and a timestamp that no longer reads counts as tampered.</p>}
                 {analysis.unrecognisable && (
                   <p className="note">That still no longer matches the tape. The detectives are asking questions.</p>
                 )}
@@ -694,6 +824,12 @@ function RapSheet({ alias, history, stars, cash, walked, onReplay, home }) {
   const [poster, setPoster] = useState(null);
   const [posterError, setPosterError] = useState(false);
   const [printAttempt, setPrintAttempt] = useState(0);
+  // A studio edit is what the rap sheet shows, downloads and shares. The scored history never changes.
+  const [edited, setEdited] = useState(null);
+  const [studio, setStudio] = useState(false);
+  const customize = useRef(null);
+  useEffect(() => () => { if (edited) URL.revokeObjectURL(edited); }, [edited]);
+  const shown = edited ?? poster;
   const busted = stars >= MAX_STARS;
   const rank = useMemo(() => rankFor(stars, busted, history.length, walked), [stars, busted, history.length, walked]);
   useEffect(() => {
@@ -712,9 +848,8 @@ function RapSheet({ alias, history, stars, cash, walked, onReplay, home }) {
     };
   }, [alias, history, stars, cash, busted, rank, printAttempt]);
 
-  const tweet = encodeURIComponent(
-    `I doctored ${history.length} VCPD tapes in Leonida Evidence Room: ${money(cash)} earned, ${stars}★ heat. Rank: ${rank.title}. #BuiltWithImageEditor #GTAVI`,
-  );
+  const text = `I doctored ${history.length} VCPD tapes in Leonida Evidence Room: ${money(cash)} earned, ${stars}★ heat. Rank: ${rank.title}. #BuiltWithImageEditor #GTAVI`;
+  const tweet = encodeURIComponent(text);
   return (
     <div className="screen rapsheet">
       <div className="rap-inner">
@@ -723,17 +858,24 @@ function RapSheet({ alias, history, stars, cash, walked, onReplay, home }) {
         <h2 className="logo small"><span>{rank.title}</span></h2>
         <p className="lede">{rank.line}</p>
         <div className="poster-slot">
-          {poster ? <img className="poster" src={poster} alt="Your rap sheet poster" /> : posterError ? <p role="alert">The poster could not be created. Retry below.</p> : <p>Printing…</p>}
+          {poster ? <img key={shown} className="poster" src={shown} alt={edited ? 'Your customized rap sheet poster' : 'Your rap sheet poster'} /> : posterError ? <p role="alert">The poster could not be created. Retry below.</p> : <p>Printing…</p>}
+          {edited && <span className="poster-badge">Edited</span>}
         </div>
+        {poster && <div className="actions studio-actions">
+          <button ref={customize} className="btn studio-open" onClick={() => setStudio(true)}>Customize poster</button>
+          {edited && <button className="btn" onClick={() => { setEdited(null); customize.current.focus(); }}>Back to original</button>}
+        </div>}
         <div className="actions">
-          {poster ? <a className="btn primary" href={poster} download="leonida-rap-sheet.png">Download poster</a>
+          {poster ? <a className="btn primary" href={shown} download="leonida-rap-sheet.png">Download poster</a>
             : posterError ? <button className="btn primary" onClick={() => { setPosterError(false); setPrintAttempt(n => n + 1); }}>Retry poster</button>
               : <button className="btn primary" disabled>Preparing poster…</button>}
+          {poster && <SharePoster src={shown} text={text} />}
           <a className="btn" href={`https://twitter.com/intent/tweet?text=${tweet}`} target="_blank" rel="noreferrer">Share on X</a>
           <button className="btn" onClick={onReplay}>Run it back</button>
         </div>
         <Leaderboard alias={alias} history={history} eligible={!busted && !walked && history.length === CASES.length} walked={walked} />
       </div>
+      {studio && <PosterStudio src={shown} projectId={EDITOR_OPTIONS.projectId} onClose={() => setStudio(false)} onSave={blob => { setEdited(URL.createObjectURL(blob)); setStudio(false); }} />}
     </div>
   );
 }

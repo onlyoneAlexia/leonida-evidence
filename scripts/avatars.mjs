@@ -199,6 +199,104 @@ try {
   assert.ok(windows.jewelry.flash > 0.2 && windows.jewelry.touristFlash === false, "The tourist's flash whites out his face for a moment");
   console.log(`PASS windows: Kwik pillar ${kwikPillar.map(n => n.toFixed(2)).join('-')}s, causeway ${windows.causeway.paying.map(s => s.map(n => n.toFixed(2)).join('-'))}s, Diamond Mile bus ${bus.map(n => n.toFixed(2)).join('-')}s; fx and cues`);
 
+  // Toolkits: each job allows only some editor tools, and whatever is in shot, plus the mid-edit surprise, can be hidden
+  // with them at any freeze. Each job's edit is simulated: spray strokes (draw), a rectangle with a little slack (shapes),
+  // a round sticker scaled up over the box (stickers), or a crop that pushes every hide off an edge (crop).
+  const kits = await page.evaluate(async () => {
+    const { CASES, renderCase, drawLive } = await import('/src/scenes.js');
+    const { analyse } = await import('/src/forensics.js');
+    const TOOLS = ['crop', 'filter', 'draw', 'text', 'shapes', 'stickers'];
+    const EDIT = { kwik: 'draw', causeway: 'stickers', bank: 'shapes', marina: 'crop', jewelry: 'shapes' };
+    // Each tool's cover for a box: a region test (for clearance) and how to paint it.
+    const cover = {
+      draw: r => ({ inside: (x, y) => x > r.x - 11 && x < r.x + r.w + 11 && y > r.y - 11 && y < r.y + r.h + 11, paint: g => {
+        g.strokeStyle = '#ff2d95'; g.lineWidth = 22; g.lineCap = g.lineJoin = 'round'; g.beginPath();
+        for (let y = r.y; y < r.y + r.h + 11; y += 11) { g.moveTo(r.x, Math.min(y, r.y + r.h)); g.lineTo(r.x + r.w, Math.min(y, r.y + r.h)); }
+        g.stroke();
+      } }),
+      shapes: r => ({ inside: (x, y) => x > r.x - 3 && x < r.x + r.w + 3 && y > r.y - 3 && y < r.y + r.h + 3, paint: g => { g.fillStyle = '#1b1426'; g.fillRect(r.x - 3, r.y - 3, r.w + 6, r.h + 6); } }),
+      stickers: r => {
+        const cx = r.x + r.w / 2, cy = r.y + r.h / 2, rad = Math.hypot(r.w, r.h) / 2 + 3;
+        return { inside: (x, y) => Math.hypot(x - cx, y - cy) < rad, paint: g => {
+          g.fillStyle = '#ffd23f'; g.beginPath(); g.arc(cx, cy, rad, 0, 7); g.fill();
+          g.fillStyle = '#3a2410'; for (const dx of [-0.35, 0.35]) { g.beginPath(); g.arc(cx + dx * rad, cy - 0.25 * rad, rad * 0.12, 0, 7); g.fill(); }
+        } };
+      },
+    };
+    // The biggest crop that keeps every KEEP whole and pushes each hide off one edge.
+    const cropFor = (hides, keeps) => {
+      let best = null;
+      for (let m = 0; m < 4 ** hides.length; m++) {
+        let x0 = 0, y0 = 0, x1 = 1280, y1 = 720;
+        hides.forEach(({ rect: r }, i) => {
+          const e = Math.floor(m / 4 ** i) % 4;
+          if (e === 0) y0 = Math.max(y0, r.y + r.h); else if (e === 1) x1 = Math.min(x1, r.x); else if (e === 2) x0 = Math.max(x0, r.x + r.w); else y1 = Math.min(y1, r.y);
+        });
+        x0 = Math.ceil(x0); y0 = Math.ceil(y0); x1 = Math.floor(x1); y1 = Math.floor(y1);
+        if (x1 - x0 < 64 || y1 - y0 < 64 || !keeps.every(({ rect: k }) => k.x >= x0 && k.y >= y0 && k.x + k.w <= x1 && k.y + k.h <= y1)) continue;
+        if (!best || (x1 - x0) * (y1 - y0) > best.w * best.h) best = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+      }
+      return best;
+    };
+    // Share of a KEEP box a cover reaches, sampled on a grid.
+    const hit = (k, covers) => {
+      let n = 0;
+      for (let j = 0; j < 12; j++) for (let i = 0; i < 12; i++) if (covers.some(c => c.inside(k.x + ((i + 0.5) / 12) * k.w, k.y + ((j + 0.5) / 12) * k.h))) n++;
+      return n / 144;
+    };
+    const g = Object.assign(document.createElement('canvas'), { width: 1280, height: 720 }).getContext('2d');
+    const out = {};
+    for (let i = 0; i < CASES.length; i++) {
+      const c = CASES[i], tool = EDIT[c.id];
+      const o = out[c.id] = { toolkit: c.toolkit, tool, valid: !!c.toolkit && c.toolkit.tools.length > 0 && c.toolkit.tools.every(t => TOOLS.includes(t)) && typeof c.toolkit.label === 'string' && typeof c.toolkit.why === 'string', geometry: [], forensics: [], frames: 0 };
+      // Fine sweep of the geometry: the tool reaches every hide without reaching a KEEP, or a crop exists.
+      for (let t = 0; t <= c.clip + 1e-6; t += 0.05) {
+        const f = drawLive(g, c, t);
+        const all = [...f.targets, ...(f.surprise ? [f.surprise] : []), { key: 'stamp', kind: 'keep', rect: f.stamp }];
+        const hides = all.filter(x => x.kind === 'hide'), keeps = all.filter(x => x.kind === 'keep');
+        const worst = tool === 'crop' ? (cropFor(hides, keeps) ? 0 : 1) : Math.max(0, ...keeps.map(k => hit(k.rect, hides.map(h => cover[tool](h.rect)))));
+        if (worst > 0.2) o.geometry.push({ t: +t.toFixed(2), worst });
+      }
+      // Forensics on the edited export across the clip.
+      for (let t = 0; t <= c.clip + 1e-6; t = Math.round((t + 0.37) * 100) / 100) {
+        for (const at of t + 0.37 > c.clip ? [t, c.clip] : [t]) {
+          const s = renderCase(c, i, at);
+          const all = [...s.targets, ...(s.surprise ? [s.surprise] : [])];
+          const hides = all.filter(x => x.kind === 'hide');
+          const e = document.createElement('canvas');
+          if (tool === 'crop') {
+            const k = cropFor(hides, all.filter(x => x.kind === 'keep'));
+            if (!k) { o.forensics.push({ t: at, fail: 'no crop' }); continue; }
+            Object.assign(e, { width: k.w, height: k.h });
+            e.getContext('2d').drawImage(s.canvas, -k.x, -k.y);
+          } else {
+            Object.assign(e, { width: 1280, height: 720 });
+            const eg = e.getContext('2d');
+            eg.drawImage(s.canvas, 0, 0);
+            for (const h of hides) cover[tool](h.rect).paint(eg);
+          }
+          const a = await analyse(s.canvas, e.toDataURL(), all);
+          o.frames++;
+          const bad = a.results.filter(r => !r.pass).map(r => `${r.key} ${r.changed.toFixed(2)}`);
+          if (bad.length) o.forensics.push({ t: at, bad });
+        }
+      }
+    }
+    return out;
+  });
+  const kitNames = Object.values(kits).map(k => JSON.stringify([...k.toolkit.tools].sort()));
+  assert.equal(new Set(kitNames).size, kitNames.length, 'Every job has its own toolkit');
+  for (const [id, k] of Object.entries(kits)) {
+    assert.ok(k.valid, `${id}: toolkit is { tools, label, why } with known tools ${JSON.stringify(k.toolkit)}`);
+    assert.ok(k.toolkit.tools.includes(k.tool), `${id}: the simulated ${k.tool} edit is in the toolkit`);
+    assert.deepEqual(k.geometry, [], `${id}: ${k.tool} can hide everything in shot without touching a KEEP at every freeze`);
+    assert.deepEqual(k.forensics, [], `${id}: ${k.tool} edits pass forensics at every sampled freeze`);
+  }
+  assert.ok(!kits.causeway.toolkit.tools.some(t => ['draw', 'shapes', 'crop'].includes(t)), 'Causeway is stickers only');
+  assert.deepEqual(kits.bank.toolkit.tools, ['shapes'], 'The bank is shapes only');
+  assert.ok(kits.marina.toolkit.tools.includes('crop') && !kits.marina.toolkit.tools.some(t => ['draw', 'shapes', 'stickers', 'text'].includes(t)), 'The marina is a crop job');
+  console.log(`PASS toolkits: ${Object.entries(kits).map(([id, k]) => `${id} ${k.toolkit.label} (${k.tool}, ${k.frames} freezes)`).join('; ')}`);
+
   // Every cue the tapes use is synthesized and audible, stays silent when muted, and never throws before audio is unlocked.
   const cues = await page.evaluate(async names => {
     const out = {};

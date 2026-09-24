@@ -42,7 +42,8 @@ Lucia and Jason pulled five jobs across Leonida, and the VCPD has every one on t
 
 ## Highlights
 
-- **The editor is the game.** Draw, shapes, stickers, text, crop, filters and, where the Unlayer project allows it, the AI Assistant are all tools for making evidence disappear.
+- **The editor is the game.** Each job hands you a different Unlayer toolkit: spray and blocks at the Kwik Mart, cover-up stickers only on the causeway, clean-cut blocks at the bank, crop and tint at the marina, and the full kit on the Diamond Mile. The tools wear the game's own icons and names, and the editor's Save button is the hand-in.
+- **Customize your rap-sheet poster** in a second Unlayer editor with every tool on, including frames and resize, then download or share it.
 - **Five live CCTV tapes.** Each job plays as a short animated clip in an illustrated Leonida location: the crew walk and run with proper cycles, VCPD cruisers tear past with their light bars flashing, a helicopter sweeps its searchlight, alarms strobe and a tourist's camera flashes. Freeze the moment you want to doctor: evidence behind a passing truck, bus or pillar needs no edit, but the clock is already running.
 - **Faces, plates, a tattoo and a bag of cash to hide**, a timestamp you must not touch, Rico to frame and a tourist to leave alone.
 - **Pixel forensics** that line up crops, forgive colour grades and catch whatever is still visible.
@@ -56,7 +57,7 @@ Lucia and Jason pulled five jobs across Leonida, and the VCPD has every one on t
 2. **Freeze the frame** with the button or <kbd>Space</kbd>. Evidence that's out of sight at that moment needs no edit, but a KEEP that has to be in the shot, like Rico, must be.
 3. **Doctor the still.** Draw over faces, drop shapes or stickers, add text, or crop the evidence out. Filters are allowed, but a global blur also wipes out the timestamp. A few seconds in, detectives may **ENHANCE** and spot something new to hide, with a little extra time.
 4. **Send it to evidence** before the clock runs out. At zero, whatever is on the canvas goes in as it is.
-5. **Face forensics.** Every piece of evidence left visible, every tampered KEEP and every must-show KEEP missing from the shot adds a wanted star. Heat carries into the next tape: one star brings sirens, two add camera shake, three jam the stickers and four the shapes. Five stars and you're **BUSTED**. After the scan, drag across the tape to compare the original with your edit.
+5. **Face forensics.** Every piece of evidence left visible, every tampered KEEP and every must-show KEEP missing from the shot adds a wanted star. Heat carries into the next tape: one star brings sirens, two add camera shake, three jam one of the job's tools and four jam two, never the last one that can cover evidence. Five stars and you're **BUSTED**. After the scan, drag across the tape to compare the original with your edit.
 6. **Collect your rap sheet.** Finish all five jobs, get caught, or walk away, for a poster of your doctored stills, heat and cash. Runs that finish all five jobs can be posted to the leaderboard, which sits near the top of the homepage.
 
 The **Home** button on every screen takes you back to the landing page. Mid-run it asks first, and offers your rap sheet so far once you've finished a job.
@@ -66,15 +67,15 @@ The **Home** button on every screen takes you back to the landing page. Mid-run 
 
 ## The five jobs
 
-| # | Job | Location | Clock | Max payout | Hide | Keep |
-|:-:|---|---|:-:|--:|---|---|
-| 1 | Kwik Mart Stick-Up | Vice Beach | 90 s | $12,000 | Jason's face, getaway car plate | CCTV timestamp |
-| 2 | Causeway Getaway | Leonida Causeway | 80 s | $18,000 | License plate, Lucia's face | CCTV timestamp |
-| 3 | Bank of Leonida | Downtown Vice City | 75 s | $30,000 | Jason's face, Lucia's L+J tattoo | Rico's face (must be in the shot), CCTV timestamp |
-| 4 | Keys Marina Drop | Leonida Keys | 70 s | $42,000 | Duffel bag of cash, boat registration | Rico's boat name (must be in the shot), drone timestamp |
-| 5 | Diamond Mile | Vice City Strip | 65 s | $75,000 | Jason's face, Lucia's face, license plate | Rico's face (must be in the shot), the tourist's face, CCTV timestamp |
+| # | Job | Location | Clock | Max payout | Toolkit | Hide | Keep |
+|:-:|---|---|:-:|--:|---|---|---|
+| 1 | Kwik Mart Stick-Up | Vice Beach | 90 s | $12,000 | Spray, Blocks | Jason's face, getaway car plate | CCTV timestamp |
+| 2 | Causeway Getaway | Leonida Causeway | 80 s | $18,000 | Cover-ups | License plate, Lucia's face | CCTV timestamp |
+| 3 | Bank of Leonida | Downtown Vice City | 75 s | $30,000 | Blocks | Jason's face, Lucia's L+J tattoo | Rico's face (must be in the shot, a step from Jason's), CCTV timestamp |
+| 4 | Keys Marina Drop | Leonida Keys | 70 s | $42,000 | Cut, Tint | Duffel bag of cash, boat registration | Rico's boat name (must be in the shot), drone timestamp |
+| 5 | Diamond Mile | Vice City Strip | 65 s | $75,000 | Full kit | Jason's face, Lucia's face, license plate | Rico's face (must be in the shot), Rico's plate, the tourist's face, CCTV timestamp |
 
-The clocks shrink as the jobs get bigger, and the tape's running time counts against them. Each tape also hides one piece of evidence that detectives spot mid-edit, such as Jason on the store's security monitor or his dropped ID card.
+Each job's toolkit is the only set of tools the editor offers for it, so every tape needs a different technique: the marina, for example, can only be cropped, with the timestamp bottom-left and Rico's yacht name in shot. The clocks shrink as the jobs get bigger, and the tape's running time counts against them. Each tape also hides one piece of evidence that detectives spot mid-edit, such as Jason on the store's security monitor or his dropped ID card.
 
 ### Scoring
 
@@ -126,11 +127,14 @@ The editor is the core mechanic, not decoration:
 
 | Editor API | What the game does with it |
 |---|---|
-| `<ImageEditor image>` | Loads the frame you froze from the live tape as a data URL. |
-| `options.features.imageEditor.tools` | Turns off Resize and Frame, so exports stay comparable with the original tape. Under heat pressure it also jams Stickers (three stars) and Shapes (four). |
-| `options.projectId` and `features.ai` | Enables Unlayer's AI Assistant for projects entitled to it. |
-| `editor.getImage()` | Exports the doctored still when you send it to evidence or the clock hits zero. Any open tool panel is closed first, because filter and crop changes only commit when their panel closes. |
-| `onSave` and `onCancel` | The editor's own Save and Cancel buttons are hidden during a case, so **Send to evidence** is the only way to hand in a tape. Both callbacks stay wired as a fallback: Save submits, and Cancel resets the tape through `editor.reset()`. |
+| `<ImageEditor image>` | Loads the frame you froze from the live tape as a data URL, and the finished rap-sheet poster in the poster studio. |
+| `options.features.imageEditor.tools` | Set per job before mount, so the editor only offers that job's toolkit. Resize and Frame stay off during a case (exports must stay comparable with the tape) and come back in the poster studio. Heat pressure jams tools from the kit, never the last one that can cover evidence. |
+| `tools.<tool>.icon` and `options.translations` | The game's own inline SVG icons and names: Cut, Tint, Spray, Caption, Blocks, Cover-ups. The editor's Save reads "Send to evidence" and Cancel "Reset tape". |
+| `onSave({ dataUrl })` | The editor's own Save is a real hand-in; it commits an open crop or filter first. The HUD button and the countdown go through `editor.getImage()` after closing any open tool panel, because `getImage()` doesn't include pending previews. All three paths submit once. |
+| `editor.hasChanges()` | Warns once before sending an untouched still while evidence is in shot, and asks before Reset tape discards edits. |
+| `onError`, `onLoadError` | Separate messages for the embed failing to load, the still failing to decode, and an export failing. A failed export keeps the editor and your edits on screen, pauses the clock and lets you send again. |
+| `onCancel` | Reset tape: reloads the frozen still through `editor.reset()`. |
+| Poster studio | A second `<ImageEditor>` at the end of a run with all eight tools on. Its Save returns `{ dataUrl, blob }`, which becomes the poster you download or share through the Web Share API. |
 
 ### Forensics engine
 
@@ -138,7 +142,8 @@ The editor is the core mechanic, not decoration:
 
 1. **Alignment.** A coarse-to-fine search finds where a cropped export sits inside the original frame.
 2. **Colour fit.** A robust least-squares colour transform means brightness, contrast or sepia filters alone don't count as tampering.
-3. **Cell inspection.** Each evidence box is split into 8×8 cells. A cell counts as hidden if it was painted over, covered, cropped away, or lost more than half of its detail to blur. Only cells that carry detail are judged.
+3. **Transforms.** Crop's flip, quarter turns and straighten (to ±45°) are detected and undone, so evidence is judged where it really is. A flipped, turned or tilted timestamp or name no longer reads, so it counts as tampered.
+4. **Cell inspection.** Each evidence box is split into 8×8 cells. A cell counts as hidden if it was painted over, covered, cropped away, or lost more than half of its detail to blur. Only cells that carry detail are judged.
 
 The verdict screen then replays the check box by box, and a scrubbed face comes back **CLEAN** while a visible one is a **MATCH**.
 
@@ -206,17 +211,19 @@ Link previews show `public/social-card.jpg` and need its absolute URL. Netlify a
 
 ## Tests
 
-Run `npm run check` (lint and build), then start `npm run preview -- --host 127.0.0.1 --port 5201` for the production suites. For the last three suites, start `npm run dev -- --host 127.0.0.1 --port 5200` instead.
+Run `npm run check` (lint and build), then start `npm run preview -- --host 127.0.0.1 --port 5201` for the production suites. For the dev-server suites, start `npm run dev -- --host 127.0.0.1 --port 5200` instead.
 
 | Command | Server | What it covers |
 |---|---|---|
-| `npm run test:release` | Preview, port 5201 | The production build with a deterministic editor double: five clean jobs, poster download, a leaderboard post, replay, recovery from loading, export and analysis failures, mobile layout, out-of-sight evidence, the mid-edit surprise, the Home button and walking away, the hero's TOP FIXER readout, the board offline, countdown expiry, heat carrying over, sound files and the mute setting |
+| `npm run test:release` | Preview, port 5201 | The production build with a deterministic editor double: five clean jobs with each job's toolkit, the Save hand-in, export-failure recovery, the untouched warning, poster download, a leaderboard post, replay, recovery from loading, export and analysis failures, mobile layout, out-of-sight evidence, the mid-edit surprise, the Home button and walking away, the hero's TOP FIXER readout, the board offline, countdown expiry, heat carrying over, sound files and the mute setting |
 | `npm run test:leaderboard` | None | Leaderboard rules and handler: impossible runs refused, ranking, names, rate limit and error responses |
 | `node scripts/release-live.mjs` | Preview, port 5201 | The real hosted editor: three jobs to a bust, the BUSTED stamp, poster download and the mobile editor. Needs network access |
 | `npm run test:workspace` | Preview, port 5201 | The live editor at three widths: collapsed tool settings, drawing, full screen, tall panels and filters that are still open when you submit |
 | `npm run test:home` | Dev, port 5200 | The landing page at four widths and with reduced motion, plus the `/#play` deep link |
 | `npm run test:responsive` | Dev, port 5200 | Every screen, played through to a bust, on phones in both orientations, a tablet and a desktop: no sideways overflow, no covered controls, 44px touch targets, no text under 9px, and the hero's call to action on the first screen |
-| `npm run test:avatars` | Dev, port 5200 | Scene art and forensic scoring for all five jobs, the live tape's out-of-sight and must-show rules and timing windows, the animation strips' face boxes, `fx` and the sound cues |
+| `npm run test:forensics` | Dev, port 5200 | 293 exports and 1,341 verdicts: flips, 90/180/270 turns, straighten, crops after each, filters and painting after a crop |
+| `npm run test:poster` | Dev, port 5200 | The poster studio: opening, Save replacing the download, Back to original, Cancel, share fallback, Escape and focus, phone layouts |
+| `npm run test:avatars` | Dev, port 5200 | Scene art and forensic scoring for all five jobs, the live tape's out-of-sight and must-show rules and timing windows, the animation strips' face boxes, `fx`, the sound cues, and each job's toolkit solving every target at every freeze |
 
 Set `HOME_TEST_URL` to point a suite at another server, and `BROWSER_CHANNEL=chrome` to test in Chrome instead of Microsoft Edge.
 
