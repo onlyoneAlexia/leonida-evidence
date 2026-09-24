@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "check": "npm run lint && npm run build",
     "test:home": "node scripts/home.mjs",
+    "test:leaderboard": "node scripts/leaderboard.mjs",
     "test:responsive": "node scripts/responsive.mjs",
     "test:avatars": "node scripts/avatars.mjs",
     "test:release": "node scripts/release.mjs",

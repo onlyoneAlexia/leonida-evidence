@@ -7,7 +7,7 @@ await p.goto('http://localhost:5199/');
 await p.getByPlaceholder('Your fixer alias').fill('Tidy Tim');
 await p.getByRole('button', { name: /START THE FIRST JOB/ }).click({ timeout: 20000 });
 for (let i = 0; i < 5; i++) {
-  await p.getByText('Start doctoring').click();
+  await p.locator('.brief-side').getByRole('button', { name: 'Roll tape', exact: true }).click(); await p.getByRole('button', { name: /Freeze frame/ }).click();
   await p.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'), null, { timeout: 30000 });
   if (i === 2) await p.screenshot({ path: 'scripts/s7-lab-bank.png' });
   await p.getByText('Send to evidence').click();

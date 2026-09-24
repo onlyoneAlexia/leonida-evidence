@@ -81,3 +81,16 @@ export function drawAvatar(g, options) {
   if (tattoo) drawTattoo(g, tattoo);
   return { face, tattoo };
 }
+
+// Paints a crew member's head, cropped from the atlas, into `rect` (photos, screens, ID cards).
+export function drawHead(g, who, rect) {
+  const sprite = SPRITES[who];
+  if (!atlas || !sprite) return;
+  const cellWidth = atlas.naturalWidth / 4;
+  const [fx, fy, fw, fh] = sprite.face;
+  const sx = sprite.column * cellWidth + (fx - fw * 0.3) * cellWidth;
+  const sy = (fy - fh * 0.25) * atlas.naturalHeight;
+  const sw = fw * 1.6 * cellWidth;
+  const sh = sw * rect.h / rect.w;
+  g.drawImage(atlas, sx, sy, sw, sh, rect.x, rect.y, rect.w, rect.h);
+}

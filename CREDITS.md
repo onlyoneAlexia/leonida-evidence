@@ -39,10 +39,12 @@ All seven sounds are by [Kenney](https://kenney.nl), released under [CC0 1.0](ht
 | `busted.wav` | The VCPD catches up | Impact Sounds and Digital Audio | `impactMetal_heavy_001.ogg` mixed with `lowDown.ogg` |
 | `cash.wav` | A case pays out | RPG Audio | `handleCoins.ogg` |
 
+The police siren under heat pressure is synthesized in code by `siren()` in [`src/sound.js`](src/sound.js), so it has no file.
+
 ## Artwork
 
 - **Illustrations.** The crew hero, the evidence studio and the character sprite atlas were generated for this project with an AI image model, from character references supplied by the author. Sources and prompts are in [`artwork/`](artwork/ARTWORK.md).
-- **CCTV scenes.** All five tapes are drawn in code by [`src/scenes.js`](src/scenes.js).
+- **CCTV scenes.** The five backgrounds, the vehicles, the duffel bag, the boats, the bystanders and the foreground props were generated for this project with OpenAI's image generation, run through Codex, using the crew illustrations as the style reference. Originals and prompts are in [`artwork/CODEX-SCENES.md`](artwork/CODEX-SCENES.md). [`src/scenes.js`](src/scenes.js) animates them and draws the plates, hull lettering, signs and small evidence in code.
 - **Icons and link preview.** The favicon and home-screen icon were drawn for this project. The link-preview card is a render of the hero, made by [`scripts/brand-assets.mjs`](scripts/brand-assets.mjs).
 
 ## Trademarks

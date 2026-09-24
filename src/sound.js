@@ -46,6 +46,26 @@ export function play(name) {
   source.start();
 }
 
+// A short two-tone police wail for heat pressure, synthesized so it needs no file.
+export function siren(seconds = 1.6) {
+  if (muted || !ctx) return;
+  const t0 = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const filter = ctx.createBiquadFilter();
+  const gain = ctx.createGain();
+  osc.type = 'sawtooth';
+  for (let i = 0; i * 0.4 < seconds; i++) osc.frequency.setValueAtTime(i % 2 ? 620 : 830, t0 + i * 0.4);
+  filter.type = 'lowpass';
+  filter.frequency.value = 1800;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(0.05 * MASTER, t0 + 0.05);
+  gain.gain.setValueAtTime(0.05 * MASTER, t0 + seconds - 0.25);
+  gain.gain.linearRampToValueAtTime(0, t0 + seconds);
+  osc.connect(filter).connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + seconds);
+}
+
 export const isMuted = () => muted;
 
 export function setMuted(value) {

@@ -11,7 +11,8 @@ export async function open() {
   return { b, p };
 }
 export async function startCase(p) {
-  await p.getByText('Start doctoring').click();
+  await p.locator('.brief-side').getByRole('button', { name: 'Roll tape', exact: true }).click();
+  await p.getByRole('button', { name: /Freeze frame/ }).click();
   await p.waitForFunction(() => /\d:\d\d/.test(document.querySelector('.timer')?.textContent || ''), null, { timeout: 40000 });
   await p.waitForTimeout(600);
 }

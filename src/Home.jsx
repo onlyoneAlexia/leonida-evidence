@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { CASES } from './scenes.js';
+import LeaderboardTable from './LeaderboardTable.jsx';
+import { boardRows, useLeaderboard } from './leaderboard.js';
 import './Home.css';
 
 const ART = '/art/leonida-crew-v2.webp';
@@ -25,6 +27,7 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
   const [redacted, setRedacted] = useState(true);
   const mission = CASES[selected];
   const scene = scenes?.[selected];
+  const [{ board, error: boardError }] = useLeaderboard();
 
   useEffect(() => {
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -101,7 +104,7 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
         <h2 id="how-title" className="ler-heading">HOW IT WORKS<span className="ler-index">01</span></h2>
         <p className="ler-subheading">A little creativity. A lot of plausible deniability.</p>
         <ol className="ler-steps">
-          <li><span className="ler-step-icon" aria-hidden="true">⌖</span><b>01 / FIND IT</b><h3>Read the room.</h3><p>The tape tells a story. Find the faces, plates, and cash you need to hide. Keep the timestamp intact.</p></li>
+          <li><span className="ler-step-icon" aria-hidden="true">⌖</span><b>01 / FREEZE IT</b><h3>Pick your moment.</h3><p>The tape rolls live. Freeze the frame where the least evidence shows, but the clock is already running. Keep the timestamp intact.</p></li>
           <li><span className="ler-step-icon" aria-hidden="true">✎</span><b>02 / FIX IT</b><h3>Change the story.</h3><p>Paint, crop, cover, or drop a sticker. Use Unlayer’s image editor to clean up the crew’s mistakes before time runs out.</p></li>
           <li><span className="ler-step-icon" aria-hidden="true">☆</span><b>03 / GET AWAY</b><h3>Lose the heat.</h3><p>Forensics checks what’s left. Missed evidence adds wanted stars. Five stars and the whole operation is busted.</p></li>
         </ol>
@@ -148,11 +151,20 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
         <div className="ler-case-info" aria-live="polite" aria-atomic="true"><div><span>FILE {pad(selected)} / {mission.place}</span><p>{mission.brief}</p></div><div className="ler-case-payout"><span>MAX PAYOUT</span><b>${mission.payout.toLocaleString('en-US')}</b></div><a href="#evidence" className="ler-button">INSPECT TAPE <Arrow /></a></div>
       </section>
 
+      <section id="leaders" className="ler-leaders ler-grid-bg" aria-labelledby="leaders-title">
+        <div className="ler-section-top"><span>04 / MOST WANTED</span><span>CLEAN RUNS ONLY</span></div>
+        <h2 id="leaders-title" className="ler-heading">TOP FIXERS.<span className="ler-index">04</span></h2>
+        <p className="ler-subheading">Most cash wins. Faster hands break ties.</p>
+        {board?.top.length ? <LeaderboardTable className="ler-board" rows={boardRows(board)} />
+          : <p className="ler-board-note" role="status">{board ? 'No clean runs yet. Finish all five jobs to take the top spot.' : boardError || 'Pulling the file…'}</p>}
+        <p className="ler-board-note">Only runs that finish all five jobs count. Time is the clock you used across the jobs.</p>
+      </section>
+
       <section id="play" className="ler-play" aria-labelledby="play-title">
         <div className="ler-play-art" role="img" aria-label="The crew waiting in the illustrated evidence studio" />
         <div className="ler-play-copy">
-          <p className="ler-kicker">04 / CLOCK IN, CLEAN UP</p>
-          <h2 id="play-title" className="ler-heading">YOU WERE<br />NEVER HERE.<span className="ler-index">04</span></h2>
+          <p className="ler-kicker">05 / CLOCK IN, CLEAN UP</p>
+          <h2 id="play-title" className="ler-heading">YOU WERE<br />NEVER HERE.<span className="ler-index">05</span></h2>
           <p className="ler-subheading">New name. Clean slate. Dirty work.</p>
           <form onSubmit={e => { e.preventDefault(); if (ready) onStart(); }}>
             <label htmlFor="fixer-alias">WHAT DO WE CALL YOU? <span>(OPTIONAL)</span></label>

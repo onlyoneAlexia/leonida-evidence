@@ -90,13 +90,14 @@ try {
     for (let i = 0; i < 5 && !(await page.locator('.rapsheet').count()); i++) {
       await page.waitForSelector('.briefing');
       await check(`briefing ${i + 1}`);
-      await page.getByRole('button', { name: 'Start doctoring', exact: true }).click();
+      await page.locator('.brief-side').getByRole('button', { name: 'Roll tape', exact: true }).click();
+      await page.getByRole('button', { name: /Freeze frame/ }).click();
       await page.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'));
       await check(`lab ${i + 1}`);
       await page.getByRole('button', { name: /Send to evidence/ }).click();
       await page.waitForSelector('.ledger');
       await check(`verdict ${i + 1}`);
-      await page.locator('.verdict .btn.primary').click({ timeout: 5000 });
+      await page.locator('.verdict-body .btn.primary').click({ timeout: 5000 });
       await page.waitForSelector('.briefing, .rapsheet');
     }
     await page.waitForSelector('.rapsheet .poster');

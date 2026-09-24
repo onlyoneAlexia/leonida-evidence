@@ -10,7 +10,8 @@ try {
  await page.locator('#fixer-alias').fill('Release Check');
  await page.locator('.ler-play button').click();
  for(let i=0;i<3;i++) {
-  await page.getByRole('button',{name:'Start doctoring',exact:true}).click();
+  await page.locator('.brief-side').getByRole('button',{name:'Roll tape',exact:true}).click();
+  await page.getByRole('button',{name:/Freeze frame/}).click();
   await page.waitForFunction(()=>document.querySelector('.timer')?.textContent.includes(':'),null,{timeout:90000});
   assert.ok(await page.locator('.editor-wrap canvas').count()>0, 'Live editor canvas');
   if(i===0) await page.screenshot({path:'scripts/release-live-editor.png'});
@@ -18,7 +19,7 @@ try {
   await page.waitForSelector('.ledger',{timeout:30000});
   console.log(`Live case ${i+1}:`,await page.locator('.stamp-text').innerText());
   if(i===2) assert.equal(await page.locator('.busted-stamp').innerText(),'BUSTED','Bust is stamped across the still');
-  await page.locator('.verdict .btn.primary').click();
+  await page.locator('.verdict-body .btn.primary').click();
  }
  await page.waitForSelector('.poster',{timeout:20000});
  const download=page.waitForEvent('download');
@@ -32,7 +33,8 @@ try {
  await mobile.goto(process.env.HOME_TEST_URL || 'http://127.0.0.1:5201/');
  await mobile.waitForSelector('.ler-play button:not([disabled])');
  await mobile.locator('.ler-play button').click();
- await mobile.getByRole('button',{name:'Start doctoring',exact:true}).click();
+ await mobile.locator('.brief-side').getByRole('button',{name:'Roll tape',exact:true}).click();
+ await mobile.getByRole('button',{name:/Freeze frame/}).click();
  await mobile.waitForFunction(()=>document.querySelector('.timer')?.textContent.includes(':'),null,{timeout:90000});
  assert.ok(await mobile.locator('.editor-wrap canvas').count()>0);
  assert.ok(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Live mobile editor overflows');

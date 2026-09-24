@@ -18,7 +18,7 @@ await p.getByPlaceholder('Your fixer alias').fill('Timi');
 await p.getByRole('button', { name: /START THE FIRST JOB/ }).click();
 await p.waitForTimeout(1200);
 await p.screenshot({ path: 'scripts/x03-brief.png' });
-await p.getByText('Start doctoring').click();
+await p.locator('.brief-side').getByRole('button', { name: 'Roll tape', exact: true }).click(); await p.getByRole('button', { name: /Freeze frame/ }).click();
 const tLab = Date.now();
 await p.waitForFunction(() => /\d:\d\d/.test(document.querySelector('.timer')?.textContent || ''), null, { timeout: 40000 });
 console.log('editor ready after ms', Date.now() - tLab);

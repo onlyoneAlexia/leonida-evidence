@@ -55,4 +55,37 @@ try {
     assert.ok(r.tampered.every(t => !t.pass), `${r.id}: tampered keep targets must fail`);
     console.log(`PASS ${r.id}: illustrated scene, target bounds, untouched/covered/tampered forensic verdicts`);
   }
+
+  // The live tape: what is evidence depends on the frame the player freezes.
+  const live = await page.evaluate(async () => {
+    const { CASES, renderCase, stampTime } = await import('/src/scenes.js');
+    const at = (i, t) => {
+      const s = renderCase(CASES[i], i, t);
+      return { in: s.targets.map(x => x.key), gone: s.gone.map(x => x.key), missing: s.missing.map(x => x.key), surprise: s.surprise?.key ?? null };
+    };
+    // When the truck covers both the plate and Lucia on the causeway.
+    let blocked = null;
+    for (let t = 4.6; t < 8.4 && !blocked; t += 0.05) {
+      const f = at(1, t);
+      if (!f.in.some(k => k !== 'stamp')) blocked = { t: Math.round(t * 100) / 100, ...f };
+    }
+    return {
+      kwikEarly: at(0, 0.3), kwikMid: at(0, 4),
+      bankEarly: at(2, 0.5), bankLate: at(2, 11.5),
+      marinaEarly: at(3, 0.5), marinaLate: at(3, 11.5),
+      causewayBlocked: blocked,
+      stamp: [stampTime(CASES[0], 0), stampTime(CASES[0], 11.9)],
+    };
+  });
+  assert.deepEqual(live.kwikEarly.gone, ['face'], 'Jason is still inside the store at the start');
+  assert.ok(live.kwikMid.in.includes('face') && live.kwikMid.in.includes('plate'));
+  assert.deepEqual(live.bankEarly.missing, ['rico'], 'Rico has not walked in yet');
+  assert.ok(live.bankLate.in.includes('rico') && !live.bankLate.missing.length);
+  assert.deepEqual(live.marinaEarly.missing, ['ricoBoat'], "Rico's yacht is not in the shot yet");
+  assert.ok(live.marinaLate.in.includes('ricoBoat'));
+  assert.ok(live.causewayBlocked, 'The truck can cover the plate and Lucia at the same moment');
+  assert.deepEqual(live.causewayBlocked.gone.sort(), ['face', 'plate']);
+  assert.equal(live.causewayBlocked.surprise, null, 'Evidence hidden behind the truck cannot surprise you either');
+  assert.deepEqual(live.stamp, ['02:13:44', '02:13:55'], 'The burned-in clock runs with the tape');
+  console.log(`PASS live tape: out-of-sight evidence, must-show KEEPs, truck window at ${live.causewayBlocked.t}s, running timestamp`);
 } finally { await browser.close(); }

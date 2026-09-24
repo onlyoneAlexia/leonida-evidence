@@ -1,9 +1,27 @@
-// Procedural CCTV environments with illustrated character sprites. Scene and
-// sprite coordinates provide exact evidence bounds for the forensics checks.
-import { drawAvatar, loadAvatarArt } from './avatars.js';
+// Live CCTV scenes: illustrated backgrounds and sprites (artwork/source/codex, see scripts/import-art.mjs)
+// animated over a short clip. The player freezes the tape; that frame becomes the still they doctor.
+// Every draw returns exact evidence bounds plus what was drawn in front of them, so evidence hidden
+// behind a passing truck or a pillar at the frozen moment no longer has to be edited.
+import { drawAvatar, drawHead, loadAvatarArt } from './avatars.js';
+import { ART } from './art-manifest.js';
 
 export const W = 1280;
 export const H = 720;
+const BACKGROUNDS = ['bg-kwik', 'bg-causeway', 'bg-bank', 'bg-marina', 'bg-jewelry'];
+// Face bounds in the bystander sprites, as fractions of the sprite (x, y, w, h).
+const EXTRA_FACES = { 'bystander-tourist': [0.42, 0.05, 0.24, 0.09], 'guard-bank': [0.41, 0.06, 0.2, 0.085] };
+
+const IMG = {};
+let artLoading;
+export function loadSceneArt() {
+  artLoading ??= Promise.all([...BACKGROUNDS, ...Object.keys(ART)].map(name => new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => { IMG[name] = image; resolve(); };
+    image.onerror = () => reject(new Error(`Missing art: ${name}`));
+    image.src = `/art/scenes/${name}.webp`;
+  })));
+  return artLoading;
+}
 
 function rng(seed) {
   let a = seed >>> 0;
@@ -16,723 +34,425 @@ function rng(seed) {
   };
 }
 
+const clamp01 = n => Math.max(0, Math.min(1, n));
+const lerp = (a, b, p) => a + (b - a) * p;
+const smooth = p => p * p * (3 - 2 * p);
+const seg = (t, t0, t1) => clamp01((t - t0) / (t1 - t0));
+
 function rr(g, x, y, w, h, r) {
   g.beginPath();
   g.roundRect(x, y, w, h, r);
 }
 
-function sky(g, stops, horizon) {
-  const grad = g.createLinearGradient(0, 0, 0, horizon);
-  stops.forEach(([p, c]) => grad.addColorStop(p, c));
-  g.fillStyle = grad;
-  g.fillRect(0, 0, W, horizon);
+// A walk from a to b between t0 and t1; `step` drives the stride bob.
+function walk(t, t0, t1, a, b) {
+  const p = smooth(seg(t, t0, t1));
+  return { x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), s: lerp(a.s, b.s, p), step: t > t0 && t < t1 ? (t - t0) * 3.4 : 0 };
 }
 
-function stars(g, rand, n, maxY) {
-  for (let i = 0; i < n; i++) {
-    g.fillStyle = `rgba(255,255,255,${0.3 + rand() * 0.6})`;
-    g.fillRect(rand() * W, rand() * maxY, 2, 2);
-  }
+// Crew member from the shared atlas, feet at (x, y). Returns face/tattoo bounds and the body that blocks the view.
+function crew(g, who, pos, { tattoo = false } = {}) {
+  const bob = pos.step ? Math.abs(Math.sin(pos.step * Math.PI)) * 5 * pos.s : 0;
+  const drawn = drawAvatar(g, { avatar: who, x: pos.x, y: pos.y - bob, s: pos.s, tattoo });
+  const h = 340 * pos.s;
+  const w = h / 2;
+  return { ...drawn, depth: pos.y, body: { x: pos.x - w * 0.28, y: pos.y - h * 0.96, w: w * 0.56, h: h * 0.96 } };
 }
 
-function skyline(g, rand, baseY, color, windowColor, minH = 60, maxH = 220) {
-  let x = -20;
-  while (x < W) {
-    const w = 40 + rand() * 90;
-    const h = minH + rand() * (maxH - minH);
-    g.fillStyle = color;
-    g.fillRect(x, baseY - h, w, h);
-    for (let wy = baseY - h + 10; wy < baseY - 8; wy += 14) {
-      for (let wx = x + 6; wx < x + w - 8; wx += 12) {
-        if (rand() < 0.35) {
-          g.fillStyle = windowColor;
-          g.fillRect(wx, wy, 5, 7);
-        }
-      }
-    }
-    x += w + 4;
-  }
-}
-
-function palm(g, x, baseY, h, color, lean = 0) {
+// A sprite from the manifest, bottom-centre at (cx, bottom), `w` wide.
+function sprite(g, name, cx, bottom, w, { alpha = 1 } = {}) {
+  const a = ART[name];
+  const h = (w * a.h) / a.w;
+  const rect = { x: cx - w / 2, y: bottom - h, w, h };
   g.save();
-  g.strokeStyle = color;
-  g.fillStyle = color;
-  g.lineWidth = 10;
-  g.lineCap = 'round';
-  const tx = x + lean;
-  const ty = baseY - h;
-  g.beginPath();
-  g.moveTo(x, baseY);
-  g.quadraticCurveTo(x + lean * 0.2, baseY - h * 0.5, tx, ty);
-  g.stroke();
-  for (let i = 0; i < 7; i++) {
-    const a = (i / 7) * Math.PI * 2 + 0.3;
-    const len = h * 0.42;
-    const ex = tx + Math.cos(a) * len;
-    const ey = ty + Math.sin(a) * len * 0.45 + len * 0.25;
-    g.beginPath();
-    g.moveTo(tx, ty);
-    g.quadraticCurveTo(tx + Math.cos(a) * len * 0.5, ty - 30, ex, ey);
-    g.lineWidth = 7;
-    g.stroke();
-  }
+  g.globalAlpha = alpha;
+  g.drawImage(IMG[name], rect.x, rect.y, w, h);
   g.restore();
+  const place = a.place && { x: rect.x + a.place.x * w, y: rect.y + a.place.y * h, w: a.place.w * w, h: a.place.h * h };
+  return { rect, place, depth: bottom };
 }
 
-function neon(g, text, x, y, size, color, font = 'Anton') {
+// Bystander sprite drawn at crew scale (feet at y).
+function extra(g, name, pos) {
+  const h = 340 * pos.s * 0.96;
+  const bob = pos.step ? Math.abs(Math.sin(pos.step * Math.PI)) * 5 * pos.s : 0;
+  const s = sprite(g, name, pos.x, pos.y - bob, (h * ART[name].w) / ART[name].h);
+  const [fx, fy, fw, fh] = EXTRA_FACES[name];
+  const r = s.rect;
+  return { depth: pos.y, face: { x: r.x + fx * r.w, y: r.y + fy * r.h, w: fw * r.w, h: fh * r.h }, body: { x: r.x + r.w * 0.18, y: r.y, w: r.w * 0.64, h: r.h } };
+}
+
+const pad = (r, n) => r && { x: r.x - n, y: r.y - n, w: r.w + n * 2, h: r.h + n * 2 };
+
+function fitText(g, text, weight, family, maxW, maxH) {
+  let size = maxH;
+  g.font = `${weight} ${size}px ${family}`;
+  const w = g.measureText(text).width;
+  if (w > maxW) size = (size * maxW) / w;
+  g.font = `${weight} ${size}px ${family}`;
+}
+
+// Leonida plate painted into a sprite's placeholder box.
+function plateIn(g, r, text) {
   g.save();
-  g.font = `${size}px ${font}, sans-serif`;
+  g.fillStyle = '#f4f1e8';
+  rr(g, r.x, r.y, r.w, r.h, Math.min(6, r.h * 0.14));
+  g.fill();
+  g.strokeStyle = '#222';
+  g.lineWidth = Math.max(1, r.h * 0.05);
+  g.stroke();
+  g.textAlign = 'center';
   g.textBaseline = 'middle';
+  const cx = r.x + r.w / 2;
+  g.fillStyle = '#d2224b';
+  fitText(g, 'LEONIDA', 700, 'IBM Plex Mono, monospace', r.w * 0.6, r.h * 0.22);
+  g.fillText('LEONIDA', cx, r.y + r.h * 0.2);
+  g.fillStyle = '#10204a';
+  fitText(g, text, 700, 'IBM Plex Mono, monospace', r.w * 0.88, r.h * 0.5);
+  g.fillText(text, cx, r.y + r.h * 0.58);
+  g.fillStyle = '#2e8b57';
+  fitText(g, 'SUNSHINE STATE', 400, 'IBM Plex Mono, monospace', r.w * 0.7, r.h * 0.15);
+  g.fillText('SUNSHINE STATE', cx, r.y + r.h * 0.87);
+  g.restore();
+  return pad(r, 4);
+}
+
+// Hull lettering painted into a boat's placeholder box.
+function letterIn(g, r, text, color, family = 'Montserrat, sans-serif') {
+  g.save();
+  g.fillStyle = '#eeeade';
+  g.fillRect(r.x, r.y, r.w, r.h);
+  g.fillStyle = color;
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  fitText(g, text, 800, family, r.w * 0.94, r.h * 0.8);
+  g.fillText(text, r.x + r.w / 2, r.y + r.h * 0.55);
+  g.restore();
+  return pad(r, 4);
+}
+
+function neon(g, text, x, y, size, color, glow = 1) {
+  g.save();
+  g.font = `${size}px Anton, sans-serif`;
+  g.textBaseline = 'middle';
+  g.globalAlpha = 0.35 + 0.65 * glow;
   g.shadowColor = color;
-  g.shadowBlur = 24;
+  g.shadowBlur = 26 * glow;
   g.fillStyle = color;
   g.fillText(text, x, y);
   g.shadowBlur = 8;
   g.fillStyle = '#fff';
-  g.globalAlpha = 0.85;
+  g.globalAlpha *= 0.85;
   g.fillText(text, x, y);
   g.restore();
 }
 
-function hawaiian(g, x, y, w, h, base, flower, rand) {
-  g.fillStyle = base;
-  g.fillRect(x, y, w, h);
-  for (let i = 0; i < (w * h) / 180; i++) {
-    const fx = x + rand() * w;
-    const fy = y + rand() * h;
-    const r = 3 + rand() * 4;
-    g.fillStyle = flower;
-    for (let p = 0; p < 5; p++) {
-      const a = (p / 5) * Math.PI * 2;
-      g.beginPath();
-      g.arc(fx + Math.cos(a) * r, fy + Math.sin(a) * r, r * 0.6, 0, Math.PI * 2);
-      g.fill();
-    }
-    g.fillStyle = '#ffe066';
-    g.beginPath();
-    g.arc(fx, fy, r * 0.45, 0, Math.PI * 2);
-    g.fill();
-  }
-}
+// Neon that mostly glows but stutters now and then.
+const flicker = (t, seed) => {
+  const k = Math.sin(t * 13.1 + seed * 7) + Math.sin(t * 29.7 + seed);
+  return k > 1.7 ? 0.25 : 1;
+};
 
-// Draws a stylised person standing with feet at (x, y). Returns evidence rects.
-function person(g, o, rand) {
-  const illustrated = drawAvatar(g, o);
-  if (illustrated) return illustrated;
-  const s = o.s ?? 1;
-  const skin = o.skin;
-  const hx = o.x;
-  const hy = o.y - 290 * s;
-  const shoulderY = o.y - 245 * s;
-  const hipY = o.y - 135 * s;
-
-  // legs
-  g.fillStyle = o.pants;
-  rr(g, hx - 38 * s, hipY, 34 * s, 135 * s, 8 * s);
-  g.fill();
-  rr(g, hx + 4 * s, hipY, 34 * s, 135 * s, 8 * s);
-  g.fill();
-  g.fillStyle = '#1b1b1f';
-  rr(g, hx - 42 * s, o.y - 14 * s, 42 * s, 16 * s, 6 * s);
-  g.fill();
-  rr(g, hx + 2 * s, o.y - 14 * s, 42 * s, 16 * s, 6 * s);
-  g.fill();
-
-  // arms (skin) behind torso
-  g.fillStyle = skin;
-  rr(g, hx - 72 * s, shoulderY + 10 * s, 26 * s, 120 * s, 12 * s);
-  g.fill();
-  rr(g, hx + 46 * s, shoulderY + 10 * s, 26 * s, 120 * s, 12 * s);
-  g.fill();
-
-  // torso
+function signText(g, lines, x, y) {
   g.save();
-  rr(g, hx - 52 * s, shoulderY, 104 * s, hipY - shoulderY + 6 * s, 18 * s);
-  g.clip();
-  if (o.pattern === 'hawaiian') {
-    hawaiian(g, hx - 52 * s, shoulderY, 104 * s, hipY - shoulderY + 6 * s, o.shirt, o.flower, rand);
-  } else {
-    g.fillStyle = o.shirt;
-    g.fillRect(hx - 52 * s, shoulderY, 104 * s, hipY - shoulderY + 6 * s);
-    if (o.pattern === 'stripes') {
-      g.fillStyle = o.flower;
-      for (let i = 0; i < 12; i++) g.fillRect(hx - 52 * s, shoulderY + i * 12 * s, 104 * s, 4 * s);
-    }
+  g.fillStyle = '#fff';
+  for (const [text, font, dy] of lines) {
+    g.font = font;
+    g.fillText(text, x, y + dy);
   }
   g.restore();
-  // sleeves
-  g.fillStyle = o.pattern === 'hawaiian' ? o.shirt : o.shirt;
-  rr(g, hx - 74 * s, shoulderY, 32 * s, 42 * s, 10 * s);
-  g.fill();
-  rr(g, hx + 42 * s, shoulderY, 32 * s, 42 * s, 10 * s);
-  g.fill();
-
-  if (o.chain) {
-    g.strokeStyle = '#f5c542';
-    g.lineWidth = 4 * s;
-    g.beginPath();
-    g.arc(hx, shoulderY + 4 * s, 26 * s, 0.15 * Math.PI, 0.85 * Math.PI);
-    g.stroke();
-  }
-
-  let tattoo = null;
-  if (o.tattoo) {
-    // detailed rose + heart tattoo on the right forearm
-    const tx = hx + 59 * s;
-    const ty = shoulderY + 88 * s;
-    g.save();
-    g.strokeStyle = '#1d2a55';
-    g.fillStyle = '#b3123c';
-    g.lineWidth = 2 * s;
-    g.beginPath();
-    g.arc(tx, ty - 10 * s, 9 * s, 0, Math.PI * 2);
-    g.fill();
-    g.stroke();
-    for (let i = 0; i < 4; i++) {
-      g.beginPath();
-      g.arc(tx, ty - 10 * s, (3 + i * 2) * s, i, i + 4);
-      g.stroke();
-    }
-    g.strokeStyle = '#1f6b3a';
-    g.beginPath();
-    g.moveTo(tx, ty);
-    g.lineTo(tx, ty + 28 * s);
-    g.moveTo(tx, ty + 10 * s);
-    g.lineTo(tx - 8 * s, ty + 4 * s);
-    g.moveTo(tx, ty + 18 * s);
-    g.lineTo(tx + 8 * s, ty + 12 * s);
-    g.stroke();
-    g.fillStyle = '#1d2a55';
-    g.font = `bold ${11 * s}px IBM Plex Mono, monospace`;
-    g.textAlign = 'center';
-    g.fillText('L+J', tx, ty + 40 * s);
-    g.restore();
-    tattoo = { x: tx - 20 * s, y: ty - 26 * s, w: 40 * s, h: 72 * s };
-  }
-
-  // neck + head
-  g.fillStyle = skin;
-  g.fillRect(hx - 12 * s, hy + 20 * s, 24 * s, 30 * s);
-  g.beginPath();
-  g.ellipse(hx - 27 * s, hy + 2 * s, 6 * s, 10 * s, 0, 0, Math.PI * 2);
-  g.ellipse(hx + 27 * s, hy + 2 * s, 6 * s, 10 * s, 0, 0, Math.PI * 2);
-  g.fill();
-  g.beginPath();
-  g.ellipse(hx, hy, 28 * s, 36 * s, 0, 0, Math.PI * 2);
-  g.fill();
-
-  // hair
-  g.fillStyle = o.hair;
-  if (o.hairStyle === 'long') {
-    g.beginPath();
-    g.ellipse(hx, hy - 14 * s, 32 * s, 28 * s, 0, Math.PI, 0);
-    g.fill();
-    rr(g, hx - 34 * s, hy - 16 * s, 12 * s, 70 * s, 6 * s);
-    g.fill();
-    rr(g, hx + 22 * s, hy - 16 * s, 12 * s, 70 * s, 6 * s);
-    g.fill();
-  } else if (o.hairStyle === 'short') {
-    g.beginPath();
-    g.ellipse(hx, hy - 18 * s, 29 * s, 22 * s, 0, Math.PI, 0);
-    g.fill();
-  }
-  if (o.cap) {
-    g.fillStyle = o.cap;
-    g.beginPath();
-    g.ellipse(hx, hy - 20 * s, 31 * s, 22 * s, 0, Math.PI, 0);
-    g.fill();
-    rr(g, hx - 6 * s, hy - 24 * s, 48 * s, 8 * s, 4 * s);
-    g.fill();
-  }
-
-  // face details
-  const eyeY = hy - 4 * s;
-  g.fillStyle = o.hair;
-  g.fillRect(hx - 19 * s, eyeY - 11 * s, 13 * s, 3 * s);
-  g.fillRect(hx + 6 * s, eyeY - 11 * s, 13 * s, 3 * s);
-  if (o.glasses) {
-    g.fillStyle = '#111';
-    rr(g, hx - 22 * s, eyeY - 7 * s, 19 * s, 12 * s, 4 * s);
-    g.fill();
-    rr(g, hx + 3 * s, eyeY - 7 * s, 19 * s, 12 * s, 4 * s);
-    g.fill();
-    g.fillRect(hx - 4 * s, eyeY - 4 * s, 8 * s, 2 * s);
-    g.fillStyle = 'rgba(255,120,200,0.7)';
-    g.fillRect(hx - 19 * s, eyeY - 5 * s, 6 * s, 2 * s);
-    g.fillRect(hx + 6 * s, eyeY - 5 * s, 6 * s, 2 * s);
-  } else if (o.blink) {
-    g.strokeStyle = '#2a1a10';
-    g.lineWidth = 2 * s;
-    g.lineCap = 'round';
-    for (const ex of [-12, 12]) {
-      g.beginPath();
-      g.moveTo(hx + (ex - 6) * s, eyeY + 1 * s);
-      g.quadraticCurveTo(hx + ex * s, eyeY + 4 * s, hx + (ex + 6) * s, eyeY + 1 * s);
-      g.stroke();
-    }
-  } else {
-    for (const ex of [-12, 12]) {
-      g.fillStyle = '#fff';
-      g.beginPath();
-      g.ellipse(hx + ex * s, eyeY, 6 * s, 4 * s, 0, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = o.eye ?? '#3b2412';
-      g.beginPath();
-      g.arc(hx + ex * s, eyeY, 3 * s, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = '#000';
-      g.beginPath();
-      g.arc(hx + ex * s, eyeY, 1.4 * s, 0, Math.PI * 2);
-      g.fill();
-    }
-  }
-  g.strokeStyle = 'rgba(0,0,0,0.35)';
-  g.lineWidth = 2 * s;
-  g.beginPath();
-  g.moveTo(hx, eyeY + 2 * s);
-  g.lineTo(hx - 4 * s, eyeY + 14 * s);
-  g.lineTo(hx + 2 * s, eyeY + 15 * s);
-  g.stroke();
-  g.fillStyle = o.lips ?? '#8a3b36';
-  rr(g, hx - 9 * s, eyeY + 22 * s, 18 * s, 5 * s, 3 * s);
-  g.fill();
-  if (o.beard) {
-    // stubble along the jaw, then redraw the mouth on top
-    g.save();
-    g.beginPath();
-    g.ellipse(hx, hy, 28 * s, 36 * s, 0, 0, Math.PI * 2);
-    g.clip();
-    g.fillStyle = o.hair;
-    g.globalAlpha = 0.55;
-    g.beginPath();
-    g.ellipse(hx, hy + 30 * s, 30 * s, 22 * s, 0, 0, Math.PI * 2);
-    g.fill();
-    g.fillRect(hx - 12 * s, eyeY + 16 * s, 24 * s, 6 * s);
-    g.globalAlpha = 0.8;
-    for (let i = 0; i < 60; i++) {
-      g.fillRect(hx + (rand() - 0.5) * 50 * s, hy + (14 + rand() * 20) * s, 1.5 * s, 1.5 * s);
-    }
-    g.restore();
-    g.fillStyle = o.lips ?? '#8a3b36';
-    rr(g, hx - 9 * s, eyeY + 22 * s, 18 * s, 5 * s, 3 * s);
-    g.fill();
-  }
-  if (o.earring) {
-    g.fillStyle = '#f5c542';
-    g.beginPath();
-    g.arc(hx - 27 * s, hy + 14 * s, 3 * s, 0, Math.PI * 2);
-    g.fill();
-  }
-
-  const face = { x: hx - 38 * s, y: hy - 46 * s, w: 76 * s, h: 92 * s };
-  return { face, tattoo };
 }
 
-function plate(g, x, y, w, text) {
-  const h = w * 0.5;
+// Sun or neon glints drifting across water.
+function glints(g, t, area, color = 'rgba(255,240,210,0.55)', n = 40, seed = 3) {
+  const rand = rng(seed);
   g.save();
-  g.fillStyle = '#f4f1e8';
-  rr(g, x, y, w, h, 6);
-  g.fill();
-  g.strokeStyle = '#222';
-  g.lineWidth = 2;
-  g.stroke();
-  g.fillStyle = '#d2224b';
-  g.font = `700 ${w * 0.13}px IBM Plex Mono, monospace`;
-  g.textAlign = 'center';
-  g.fillText('LEONIDA', x + w / 2, y + h * 0.28);
-  g.fillStyle = '#10204a';
-  g.font = `700 ${w * 0.24}px IBM Plex Mono, monospace`;
-  g.fillText(text, x + w / 2, y + h * 0.72);
-  g.fillStyle = '#2e8b57';
-  g.font = `${w * 0.09}px IBM Plex Mono, monospace`;
-  g.fillText('SUNSHINE STATE', x + w / 2, y + h * 0.92);
+  g.fillStyle = color;
+  for (let i = 0; i < n; i++) {
+    const x = area.x + ((rand() * area.w + t * (8 + rand() * 18)) % area.w);
+    const y = area.y + rand() * area.h;
+    const on = Math.sin(t * (2 + rand() * 3) + i) > 0.2;
+    if (on) g.fillRect(x, y, 10 + rand() * 26, 2);
+  }
   g.restore();
-  return { x: x - 6, y: y - 6, w: w + 12, h: h + 12 };
 }
 
-// Rear view of a car, wheels resting on groundY. Returns the plate rect.
-function carRear(g, cx, groundY, w, color, plateText) {
-  const h = w * 0.55;
-  const top = groundY - h;
+function rain(g, t) {
+  const rand = rng(11);
   g.save();
-  g.fillStyle = '#0c0c10';
-  rr(g, cx - w * 0.44, groundY - 34, w * 0.18, 40, 8);
+  g.strokeStyle = 'rgba(200,220,255,0.28)';
+  g.lineWidth = 1.4;
+  g.beginPath();
+  for (let i = 0; i < 140; i++) {
+    const x = (rand() * (W + 200) - t * 180 * (0.8 + rand() * 0.4)) % (W + 200);
+    const y = (rand() * H + t * 900 * (0.8 + rand() * 0.4)) % H;
+    const px = x < -100 ? x + W + 200 : x;
+    g.moveTo(px, y);
+    g.lineTo(px - 6, y + 22);
+  }
+  g.stroke();
+  g.restore();
+}
+
+// Hazard lights: two amber glows on a car's tail lights, blinking.
+function hazards(g, car, t) {
+  if (Math.sin(t * Math.PI * 2.2) < 0) return;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  for (const fx of [0.2, 0.8]) {
+    const x = car.x + car.w * fx;
+    const y = car.y + car.h * 0.5;
+    const glow = g.createRadialGradient(x, y, 2, x, y, car.w * 0.12);
+    glow.addColorStop(0, 'rgba(255,190,60,0.9)');
+    glow.addColorStop(1, 'rgba(255,140,0,0)');
+    g.fillStyle = glow;
+    g.fillRect(x - car.w * 0.12, y - car.w * 0.12, car.w * 0.24, car.w * 0.24);
+  }
+  g.restore();
+}
+
+// --- Evidence the detectives can spot mid-edit (see `surprise` below) ---
+
+function monitor(g, r, t) {
+  g.save();
+  g.fillStyle = '#1a1c22';
+  rr(g, r.x - 4, r.y - 4, r.w + 8, r.h + 8, 4);
   g.fill();
-  rr(g, cx + w * 0.26, groundY - 34, w * 0.18, 40, 8);
-  g.fill();
-  g.fillStyle = color;
-  rr(g, cx - w * 0.38, top, w * 0.76, h * 0.45, 30);
-  g.fill();
-  g.fillStyle = 'rgba(120,190,255,0.55)';
-  rr(g, cx - w * 0.3, top + 10, w * 0.6, h * 0.3, 18);
-  g.fill();
-  g.fillStyle = color;
-  rr(g, cx - w / 2, top + h * 0.38, w, h * 0.5, 22);
-  g.fill();
+  drawHead(g, 'jason', r);
+  g.fillStyle = `rgba(80,255,150,${0.18 + 0.05 * Math.sin(t * 9)})`;
+  g.fillRect(r.x, r.y, r.w, r.h);
   g.fillStyle = 'rgba(0,0,0,0.25)';
-  g.fillRect(cx - w / 2, top + h * 0.62, w, 4);
-  g.fillStyle = '#ff2240';
-  g.shadowColor = '#ff2240';
-  g.shadowBlur = 20;
-  rr(g, cx - w * 0.47, top + h * 0.45, w * 0.2, h * 0.1, 6);
-  g.fill();
-  rr(g, cx + w * 0.27, top + h * 0.45, w * 0.2, h * 0.1, 6);
-  g.fill();
-  g.shadowBlur = 0;
-  g.fillStyle = '#1a1a1f';
-  rr(g, cx - w / 2, top + h * 0.84, w, h * 0.12, 8);
-  g.fill();
+  for (let y = r.y; y < r.y + r.h; y += 3) g.fillRect(r.x, y, r.w, 1);
   g.restore();
-  return plate(g, cx - w * 0.14, top + h * 0.52, w * 0.28, plateText);
+  return pad(r, 4);
 }
 
-function ground(g, y, color, lines) {
-  g.fillStyle = color;
-  g.fillRect(0, y, W, H - y);
-  if (lines) {
-    g.fillStyle = 'rgba(255,255,255,0.18)';
-    for (let x = -100; x < W; x += 160) {
-      g.beginPath();
-      g.moveTo(x, H);
-      g.lineTo(x + 60, y);
-      g.lineTo(x + 66, y);
-      g.lineTo(x + 12, H);
-      g.fill();
-    }
-  }
-}
-
-// CCTV overlay: scanlines, grain, vignette and the burned-in timestamp.
-function cctv(g, rand, cam, place, time) {
-  const img = g.getImageData(0, 0, W, H);
-  const d = img.data;
-  for (let i = 0; i < d.length; i += 4) {
-    const n = (rand() - 0.5) * 22;
-    const y = ((i / 4 / W) | 0) % 3 === 0 ? -10 : 0;
-    d[i] = Math.max(0, Math.min(255, d[i] * 0.92 + n + y));
-    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] * 0.96 + n + y + 4));
-    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] * 0.92 + n + y));
-  }
-  g.putImageData(img, 0, 0);
-  const v = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.7);
-  v.addColorStop(0, 'rgba(0,0,0,0)');
-  v.addColorStop(1, 'rgba(0,0,0,0.55)');
-  g.fillStyle = v;
-  g.fillRect(0, 0, W, H);
-
+function heartSticker(g, cx, cy, size) {
   g.save();
-  g.font = '600 22px IBM Plex Mono, monospace';
-  g.textBaseline = 'middle';
-  g.fillStyle = 'rgba(0,0,0,0.55)';
-  g.fillRect(20, 18, g.measureText(`${cam}  ${place}`).width + 28, 38);
-  g.fillStyle = '#e8ffe8';
-  g.fillText(`${cam}  ${place}`, 34, 38);
-  g.fillStyle = '#ff2b2b';
+  g.translate(cx, cy);
+  g.fillStyle = '#ff4fa0';
   g.beginPath();
-  g.arc(W - 118, 38, 9, 0, Math.PI * 2);
+  g.moveTo(0, size * 0.35);
+  g.bezierCurveTo(-size, -size * 0.35, -size * 0.45, -size, 0, -size * 0.45);
+  g.bezierCurveTo(size * 0.45, -size, size, -size * 0.35, 0, size * 0.35);
   g.fill();
   g.fillStyle = '#fff';
-  g.fillText('REC', W - 100, 38);
-
-  const stamp = `09/24/2026  ${time}  VCPD-NET`;
-  g.font = '600 24px IBM Plex Mono, monospace';
-  const tw = g.measureText(stamp).width;
-  const box = { x: 20, y: H - 64, w: tw + 32, h: 44 };
-  g.fillStyle = 'rgba(0,0,0,0.6)';
-  g.fillRect(box.x, box.y, box.w, box.h);
-  g.fillStyle = '#e8ffe8';
-  g.fillText(stamp, box.x + 16, box.y + box.h / 2);
-  g.restore();
-  return { x: box.x - 4, y: box.y - 4, w: box.w + 8, h: box.h + 8 };
-}
-
-const JASON = {
-  avatar: 'jason',
-  skin: '#d9a47a', shirt: '#1f7a8c', flower: '#ff7eb6', pattern: 'hawaiian',
-  pants: '#3a3a44', hair: '#3b2a1e', hairStyle: 'short', beard: true, cap: '#20202a',
-};
-const LUCIA = {
-  avatar: 'lucia',
-  skin: '#b97a56', shirt: '#161622', pattern: 'plain', pants: '#26324f',
-  hair: '#1c120c', hairStyle: 'long', earring: true, lips: '#a23a4a', tattoo: false,
-};
-const RICO = {
-  avatar: 'rico',
-  skin: '#8a5a3c', shirt: '#f0f0f0', flower: '#c0392b', pattern: 'stripes',
-  pants: '#111', hair: '#1a1a1a', hairStyle: 'none', beard: true, chain: true, glasses: true,
-};
-
-function sceneKwikMart(g, rand) {
-  sky(g, [[0, '#140a2a'], [0.55, '#5a1b63'], [1, '#ff6b3d']], 420);
-  stars(g, rand, 80, 200);
-  skyline(g, rand, 420, '#1d1030', 'rgba(255,210,120,0.8)');
-  palm(g, 80, 470, 260, '#0b0612', 20);
-  palm(g, 1210, 470, 300, '#0b0612', -30);
-  ground(g, 460, '#27212e', true);
-
-  // store
-  g.fillStyle = '#e9d6bb';
-  g.fillRect(700, 250, 560, 250);
-  g.fillStyle = '#233447';
-  g.fillRect(730, 320, 500, 150);
-  for (let row = 0; row < 3; row++) {
-    for (let i = 0; i < 24; i++) {
-      g.fillStyle = ['#ff5a5f', '#ffd166', '#06d6a0', '#118ab2', '#f78c6b'][(i + row) % 5];
-      g.fillRect(740 + i * 20, 340 + row * 42, 14, 26);
-    }
-  }
-  neon(g, 'KWIK MART', 790, 285, 50, '#ff3fa4');
-  neon(g, '24/7', 1120, 285, 44, '#29e7ff');
-
-  // canopy + pumps
-  g.fillStyle = '#f2f2f2';
-  g.fillRect(40, 190, 620, 40);
-  g.fillStyle = '#e63946';
-  g.fillRect(40, 222, 620, 10);
-  g.fillStyle = '#cfcfd6';
-  g.fillRect(90, 232, 22, 260);
-  g.fillRect(590, 232, 22, 260);
-  for (const px of [160, 520]) {
-    g.fillStyle = '#e63946';
-    rr(g, px, 360, 60, 120, 8);
-    g.fill();
-    g.fillStyle = '#9ef';
-    g.fillRect(px + 10, 375, 40, 22);
-  }
-  const plateR = carRear(g, 250, 560, 230, '#6c2bd9', 'KWK 118');
-  void plateR;
-  const j = person(g, { ...JASON, x: 430, y: 640, s: 1.25 }, rand);
-  return { face: j.face };
-}
-
-function sceneCauseway(g, rand) {
-  sky(g, [[0, '#2b0f4c'], [0.5, '#c2367a'], [1, '#ffb347']], 400);
-  g.fillStyle = '#ffdd7a';
-  g.beginPath();
-  g.arc(980, 380, 70, 0, Math.PI * 2);
-  g.fill();
-  skyline(g, rand, 400, '#3b1848', 'rgba(255,230,160,0.7)', 40, 160);
-  // water
-  const wg = g.createLinearGradient(0, 400, 0, 500);
-  wg.addColorStop(0, '#ff8a5c');
-  wg.addColorStop(1, '#3a1a5c');
-  g.fillStyle = wg;
-  g.fillRect(0, 400, W, 100);
-  for (let i = 0; i < 60; i++) {
-    g.fillStyle = 'rgba(255,220,160,0.5)';
-    g.fillRect(900 + (rand() - 0.5) * 300, 405 + rand() * 90, 30 + rand() * 40, 2);
-  }
-  ground(g, 500, '#35303c', true);
-  // railing
-  g.fillStyle = '#ddd';
-  g.fillRect(0, 488, W, 8);
-  for (let x = 0; x < W; x += 40) g.fillRect(x, 470, 6, 26);
-  g.fillRect(0, 468, W, 5);
-  // sign
-  g.fillStyle = '#0c6b3c';
-  rr(g, 60, 110, 440, 110, 10);
-  g.fill();
-  g.strokeStyle = '#fff';
-  g.lineWidth = 4;
-  g.stroke();
-  g.fillStyle = '#fff';
-  g.font = '700 34px Montserrat, sans-serif';
-  g.fillText('LEONIDA CAUSEWAY', 84, 158);
-  g.font = '600 26px Montserrat, sans-serif';
-  g.fillText('VICE CITY  →  EXIT 5A', 84, 196);
-  g.fillStyle = '#888';
-  g.fillRect(240, 220, 12, 260);
-
-  const plateR = carRear(g, 560, 660, 360, '#ff9f1c', 'LCJ 0924');
-  const l = person(g, { ...LUCIA, x: 900, y: 650, s: 1.3 }, rand);
-  return { plate: plateR, face: l.face };
-}
-
-function sceneBank(g, rand) {
-  // marble interior
-  g.fillStyle = '#efe6d8';
-  g.fillRect(0, 0, W, H);
-  for (let i = 0; i < 40; i++) {
-    g.strokeStyle = `rgba(150,130,110,${0.15 + rand() * 0.2})`;
-    g.lineWidth = 1 + rand() * 2;
-    g.beginPath();
-    const y = rand() * 460;
-    g.moveTo(0, y);
-    g.bezierCurveTo(300, y + (rand() - 0.5) * 80, 900, y + (rand() - 0.5) * 80, W, y + (rand() - 0.5) * 60);
-    g.stroke();
-  }
-  for (const px of [60, 360, 860, 1160]) {
-    g.fillStyle = '#d8ccb8';
-    g.fillRect(px, 60, 60, 420);
-    g.fillStyle = 'rgba(0,0,0,0.08)';
-    for (let k = 0; k < 5; k++) g.fillRect(px + 8 + k * 11, 60, 4, 420);
-  }
-  g.fillStyle = '#1d3c34';
-  g.fillRect(420, 60, 440, 80);
-  g.fillStyle = '#f5c542';
-  g.font = '44px Anton, sans-serif';
   g.textAlign = 'center';
-  g.fillText('BANK OF LEONIDA', 640, 118);
-  g.textAlign = 'left';
-  // counter
-  g.fillStyle = '#5b3a29';
-  g.fillRect(0, 380, W, 110);
-  g.fillStyle = '#7a4f38';
-  g.fillRect(0, 380, W, 16);
-  for (let x = 160; x < W; x += 260) {
-    g.fillStyle = 'rgba(200,230,255,0.35)';
-    g.fillRect(x, 240, 180, 140);
-    g.strokeStyle = '#c9a96e';
-    g.lineWidth = 4;
-    g.strokeRect(x, 240, 180, 140);
-  }
-  // floor checker
-  for (let y = 490; y < H; y += 46) {
-    for (let x = 0; x < W; x += 46) {
-      g.fillStyle = ((x + y) / 46) % 2 === 0 ? '#2b2b33' : '#e7e1d6';
-      g.fillRect(x, y, 46, 46);
-    }
-  }
-  const j = person(g, { ...JASON, x: 280, y: 690, s: 1.25, cap: null, glasses: false }, rand);
-  const l = person(g, { ...LUCIA, x: 640, y: 700, s: 1.35, tattoo: true, shirt: '#3b0f2e' }, rand);
-  const r = person(g, { ...RICO, x: 1010, y: 690, s: 1.25 }, rand);
-  return { jface: j.face, tattoo: l.tattoo, rico: r.face };
+  g.textBaseline = 'middle';
+  g.font = `800 ${size * 0.42}px Montserrat, sans-serif`;
+  g.fillText('L+J', 0, -size * 0.18);
+  g.restore();
+  return { x: cx - size - 4, y: cy - size - 4, w: size * 2 + 8, h: size * 1.45 + 8 };
 }
 
-function sceneMarina(g, rand) {
-  sky(g, [[0, '#2aa7d9'], [0.7, '#9fe3ff'], [1, '#ffe1b3']], 300);
-  for (let i = 0; i < 6; i++) {
-    g.fillStyle = 'rgba(255,255,255,0.85)';
-    const cx = rand() * W;
-    const cy = 60 + rand() * 120;
-    for (let k = 0; k < 4; k++) {
-      g.beginPath();
-      g.arc(cx + k * 26, cy + (k % 2) * 8, 22 + rand() * 10, 0, Math.PI * 2);
-      g.fill();
-    }
-  }
-  palm(g, 1180, 330, 220, '#2d4a2a', -20);
-  palm(g, 1080, 320, 180, '#2d4a2a', 15);
-  const sea = g.createLinearGradient(0, 300, 0, H);
-  sea.addColorStop(0, '#1fb6c9');
-  sea.addColorStop(1, '#0a4f73');
-  g.fillStyle = sea;
-  g.fillRect(0, 300, W, H - 300);
-  for (let i = 0; i < 160; i++) {
-    g.fillStyle = 'rgba(255,255,255,0.35)';
-    g.fillRect(rand() * W, 300 + rand() * 420, 20 + rand() * 30, 2);
-  }
+function note(g, r, lines, paper = '#fbf7ea', ink = '#1d2340') {
+  g.save();
+  g.fillStyle = paper;
+  g.fillRect(r.x, r.y, r.w, r.h);
+  g.fillStyle = ink;
+  g.textBaseline = 'middle';
+  lines.forEach(([text, size], i) => {
+    g.font = `700 ${size}px IBM Plex Mono, monospace`;
+    g.fillText(text, r.x + 5, r.y + (r.h / (lines.length + 1)) * (i + 1));
+  });
+  g.restore();
+  return pad(r, 3);
+}
 
-  // rival boat (background)
-  g.fillStyle = '#f7f7f7';
-  g.beginPath();
-  g.moveTo(760, 330);
-  g.lineTo(1150, 330);
-  g.lineTo(1110, 400);
-  g.lineTo(790, 400);
+function idCard(g, r) {
+  g.save();
+  g.translate(r.x + r.w / 2, r.y + r.h / 2);
+  g.rotate(-0.12);
+  g.fillStyle = '#e9f1ff';
+  rr(g, -r.w / 2, -r.h / 2, r.w, r.h, 4);
   g.fill();
-  g.fillStyle = '#c0392b';
-  g.fillRect(790, 370, 330, 10);
-  g.fillStyle = '#e0e0e0';
-  g.fillRect(850, 280, 180, 50);
-  g.fillStyle = '#10204a';
-  g.font = '700 30px Montserrat, sans-serif';
-  g.fillText("RICO'S REVENGE", 820, 360);
-  const ricoBoat = { x: 810, y: 326, w: 280, h: 46 };
+  g.fillStyle = '#1f4fa0';
+  g.fillRect(-r.w / 2, -r.h / 2, r.w, r.h * 0.24);
+  drawHead(g, 'jason', { x: -r.w / 2 + 4, y: -r.h / 2 + r.h * 0.3, w: r.w * 0.32, h: r.h * 0.62 });
+  g.fillStyle = '#1d2340';
+  g.font = `700 ${r.h * 0.17}px IBM Plex Mono, monospace`;
+  g.fillText('LEONIDA ID', -r.w / 2 + r.w * 0.4, -r.h * 0.02);
+  g.fillText('J. ****', -r.w / 2 + r.w * 0.4, r.h * 0.26);
+  g.restore();
+  return pad(r, 6);
+}
 
-  // our boat
-  g.fillStyle = '#ffffff';
-  g.beginPath();
-  g.moveTo(40, 430);
-  g.lineTo(640, 430);
-  g.lineTo(590, 560);
-  g.lineTo(90, 560);
-  g.fill();
-  g.fillStyle = '#ff5fa2';
-  g.fillRect(80, 500, 520, 14);
-  g.fillStyle = '#e8e8e8';
-  g.fillRect(160, 360, 260, 70);
-  g.fillStyle = 'rgba(40,120,180,0.7)';
-  g.fillRect(175, 372, 230, 30);
-  g.fillStyle = '#10204a';
-  g.font = '700 40px IBM Plex Mono, monospace';
-  g.fillText('FL 4471 VC', 200, 480);
-  const reg = { x: 190, y: 440, w: 280, h: 54 };
+// --- Scenes. Each draws the frame at `t` seconds and returns evidence rects and blockers. ---
 
-  // dock
-  g.fillStyle = '#8a5a34';
-  g.fillRect(0, 590, W, 130);
-  for (let x = 0; x < W; x += 70) {
-    g.fillStyle = 'rgba(0,0,0,0.25)';
-    g.fillRect(x, 590, 4, 130);
+function draw(g, list) {
+  // Nearest last: everything drawn later (larger depth) can block what was drawn before it.
+  const out = [];
+  for (const item of list.filter(Boolean).sort((a, b) => a.depth - b.depth)) out.push({ depth: item.depth, ...item.draw() });
+  return out;
+}
+const blockers = drawn => drawn.filter(d => d.body).map(d => ({ depth: d.depth, rect: d.body }));
+// A drawn person, filed under `key`, whose body blocks whatever stands behind them.
+const as = (key, p) => ({ [key]: p, body: p.body });
+
+function sceneKwik(g, t) {
+  g.drawImage(IMG['bg-kwik'], 0, 0, W, H);
+  neon(g, 'KWIK MART', 792, 168, 60, '#ff3fa4', flicker(t, 1));
+  neon(g, '24/7', 1100, 168, 48, '#29e7ff');
+  const screen = monitor(g, { x: 1068, y: 250, w: 64, h: 46 }, t);
+  // Jason is still out by the car when the tape ends: the pillar mid-walk is the only way to lose his face.
+  const J = t >= 0.8 ? walk(t, 0.8, 9.4, { x: 1110, y: 392, s: 0.6 }, { x: 656, y: 604, s: 1.05 }) : null;
+  if (J && t > 9.4) J.x += Math.sin((t - 9.4) * 2.2) * 5;
+  const drawn = draw(g, [
+    J && { depth: J.y, draw: () => as('jason', crew(g, 'jason', J)) },
+    { depth: 612, draw: () => {
+      const car = sprite(g, 'car-purple-rear', 470, 612, 300);
+      return { plate: plateIn(g, car.place, 'KWK 118'), body: car.rect };
+    } },
+    // The canopy pillar stands right in front of the camera.
+    { depth: 900, draw: () => ({ body: sprite(g, 'pillar-canopy', 887, 740, 150).rect }) },
+  ]);
+  const jason = drawn.find(d => d.jason)?.jason;
+  const car = drawn.find(d => d.plate);
+  return {
+    rects: { face: jason && { rect: jason.face, depth: jason.depth }, plate: { rect: car.plate, depth: car.depth }, screen: { rect: screen, depth: -1 } },
+    blockers: blockers(drawn),
+  };
+}
+
+function sceneCauseway(g, t) {
+  g.drawImage(IMG['bg-causeway'], 0, 0, W, H);
+  // Below the camera label, which covers the top of the sign.
+  signText(g, [['LEONIDA CAUSEWAY', '700 30px Montserrat, sans-serif', 0], ['VICE CITY  →  EXIT 5A', '600 22px Montserrat, sans-serif', 40]], 112, 94);
+  glints(g, t, { x: 520, y: 300, w: 760, h: 110 });
+  let L = null;
+  if (t >= 1.4) {
+    if (t < 5) L = walk(t, 1.4, 5, { x: 380, y: 650, s: 0.98 }, { x: 870, y: 598, s: 0.9 });
+    else if (t < 9.2) L = { x: 870 + Math.sin(t * 2) * 5, y: 598, s: 0.9, step: 0 };
+    else L = walk(t, 9.2, 12.6, { x: 870, y: 598, s: 0.9 }, { x: 400, y: 648, s: 0.98 });
   }
-  // duffel bag with cash
-  const bx = 720;
-  const by = 560;
-  g.fillStyle = '#15151a';
-  rr(g, bx, by, 220, 100, 40);
-  g.fill();
-  g.strokeStyle = '#444';
-  g.lineWidth = 6;
-  g.beginPath();
-  g.arc(bx + 110, by + 4, 50, Math.PI, 0);
-  g.stroke();
-  for (let i = 0; i < 8; i++) {
-    g.fillStyle = '#6fbf73';
-    g.save();
-    g.translate(bx + 30 + i * 22, by + 10 + (i % 3) * 6);
-    g.rotate((rand() - 0.5) * 0.8);
-    g.fillRect(-20, -8, 40, 18);
-    g.fillStyle = '#2e7d32';
-    g.font = '700 12px IBM Plex Mono, monospace';
-    g.fillText('$100', -16, 6);
-    g.restore();
-  }
+  const truckP = seg(t, 4.6, 8.4);
+  const drawn = draw(g, [
+    L && { depth: L.y, draw: () => as('lucia', crew(g, 'lucia', L)) },
+    { depth: 655, draw: () => {
+      const car = sprite(g, 'car-orange-rear', 520, 655, 400);
+      hazards(g, car.rect, t);
+      const sticker = heartSticker(g, car.rect.x + car.rect.w * 0.66, car.rect.y + car.rect.h * 0.2, car.rect.w * 0.05);
+      return { plate: plateIn(g, car.place, 'LCJ 0924'), sticker, body: car.rect };
+    } },
+    truckP > 0 && truckP < 1 && { depth: 760, draw: () => ({ body: sprite(g, 'truck-box', lerp(1350, -1000, truckP), 760, 880).rect }) },
+  ]);
+  const lucia = drawn.find(d => d.lucia)?.lucia;
+  const car = drawn.find(d => d.plate);
+  return {
+    rects: {
+      plate: { rect: car.plate, depth: car.depth },
+      face: lucia && { rect: lucia.face, depth: lucia.depth },
+      sticker: { rect: car.sticker, depth: car.depth },
+    },
+    blockers: blockers(drawn),
+  };
+}
+
+function sceneBank(g, t) {
+  g.drawImage(IMG['bg-bank'], 0, 0, W, H);
+  g.save();
   g.fillStyle = '#f5c542';
-  g.font = '64px Anton, sans-serif';
-  g.fillText('$', bx + 92, by + 86);
-  const bag = { x: bx - 10, y: by - 50, w: 240, h: 164 };
-  return { bag, reg, ricoBoat };
+  g.font = '58px Anton, sans-serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText('BANK OF LEONIDA', 642, 84);
+  g.restore();
+  glints(g, t, { x: 900, y: 120, w: 360, h: 420 }, 'rgba(255,240,200,0.35)', 18, 5);
+  const slip = note(g, { x: 822, y: 290, w: 104, h: 40 }, [['DEPOSIT', 9], ['J. ACCT 0924', 10]]);
+  const J = { x: 430 + Math.sin(t * 0.8) * 4, y: 612, s: 1.0, step: 0 };
+  const L = { x: 700, y: 640, s: 1.06, step: 0 };
+  const R = t >= 2.6 ? walk(t, 2.6, 9.4, { x: 60, y: 470, s: 0.78 }, { x: 1010, y: 650, s: 1.06 }) : null;
+  const guard = t >= 5.4 && t < 10.6 ? walk(t, 5.4, 10.6, { x: 1420, y: 745, s: 1.45 }, { x: -170, y: 745, s: 1.45 }) : null;
+  const drawn = draw(g, [
+    { depth: J.y, draw: () => as('jason', crew(g, 'jason', J)) },
+    { depth: L.y, draw: () => as('lucia', crew(g, 'lucia', L, { tattoo: true })) },
+    R && { depth: R.y, draw: () => as('rico', crew(g, 'rico', R)) },
+    guard && { depth: guard.y, draw: () => extra(g, 'guard-bank', guard) },
+  ]);
+  const pick = key => drawn.find(d => d[key])?.[key];
+  const [jason, lucia, rico] = [pick('jason'), pick('lucia'), pick('rico')];
+  return {
+    rects: {
+      jface: { rect: jason.face, depth: jason.depth },
+      tattoo: { rect: lucia.tattoo, depth: lucia.depth },
+      rico: rico && { rect: rico.face, depth: rico.depth },
+      slip: { rect: slip, depth: -1 },
+    },
+    blockers: blockers(drawn),
+  };
 }
 
-function sceneJewelry(g, rand) {
-  sky(g, [[0, '#0b0620'], [1, '#3a0f4a']], 300);
-  stars(g, rand, 60, 200);
-  skyline(g, rand, 300, '#150a26', 'rgba(255,90,200,0.7)', 80, 240);
-  ground(g, 540, '#1d1a24', true);
-  // storefront
-  g.fillStyle = '#231a33';
-  g.fillRect(0, 180, W, 360);
-  g.fillStyle = '#0e0b16';
-  g.fillRect(40, 280, 700, 240);
-  for (let i = 0; i < 14; i++) {
-    g.fillStyle = '#9ff';
-    g.save();
-    g.translate(80 + i * 48, 360 + (i % 2) * 60);
-    g.rotate(Math.PI / 4);
-    g.fillRect(-8, -8, 16, 16);
-    g.restore();
-  }
-  neon(g, 'DIAMOND MILE JEWELERS', 60, 230, 54, '#ff4fd8');
-  // shattered glass
-  g.strokeStyle = 'rgba(255,255,255,0.7)';
-  g.lineWidth = 2;
-  for (let i = 0; i < 14; i++) {
-    g.beginPath();
-    g.moveTo(420, 400);
-    const a = rand() * Math.PI * 2;
-    g.lineTo(420 + Math.cos(a) * 160, 400 + Math.sin(a) * 110);
-    g.stroke();
-  }
-  const r = person(g, { ...RICO, x: 1150, y: 600, s: 0.95 }, rand);
-  const plateR = carRear(g, 880, 700, 330, '#e11d48', 'VC 2HOT');
-  const j = person(g, { ...JASON, x: 200, y: 700, s: 1.2 }, rand);
-  const l = person(g, { ...LUCIA, x: 480, y: 705, s: 1.25 }, rand);
-  return { jface: j.face, lface: l.face, plate: plateR, rico: r.face };
+function sceneMarina(g, t) {
+  g.drawImage(IMG['bg-marina'], 0, 0, W, H);
+  glints(g, t, { x: 0, y: 290, w: W, h: 290 }, 'rgba(255,255,255,0.5)', 70, 8);
+  const yachtP = 1 - (1 - seg(t, 1.4, 6.6)) ** 2;
+  const jetP = seg(t, 4.0, 7.4);
+  const drawn = draw(g, [
+    { depth: 400, draw: () => {
+      const yacht = sprite(g, 'yacht-rival', lerp(1560, 930, yachtP), 402 + Math.sin(t * 1.3) * 2, 480);
+      return { name: letterIn(g, yacht.place, "RICO'S REVENGE", '#10204a'), body: yacht.rect };
+    } },
+    { depth: 585, draw: () => {
+      const boat = sprite(g, 'speedboat', 380, 585 + Math.sin(t * 1.7) * 4, 640);
+      return { reg: letterIn(g, boat.place, 'FL 4471 VC', '#10204a', 'IBM Plex Mono, monospace'), body: boat.rect };
+    } },
+    jetP > 0 && jetP < 1 && { depth: 612, draw: () => ({ body: sprite(g, 'jetski', lerp(-380, 1450, jetP), 612 + Math.sin(t * 9) * 3, 330).rect }) },
+    { depth: 690, draw: () => {
+      const bag = sprite(g, 'duffel-cash', 880, 690, 250);
+      const tag = note(g, { x: bag.rect.x + bag.rect.w * 0.74, y: bag.rect.y + bag.rect.h * 0.08, w: 52, h: 26 }, [['PROP. OF', 7], ['LUCIA', 8]], '#ffd23f');
+      return { bag: pad(bag.rect, -8), tag, body: bag.rect };
+    } },
+  ]);
+  const get = key => drawn.find(d => d[key]);
+  return {
+    rects: {
+      bag: { rect: get('bag').bag, depth: get('bag').depth },
+      reg: { rect: get('reg').reg, depth: get('reg').depth },
+      ricoBoat: { rect: get('name').name, depth: get('name').depth },
+      tag: { rect: get('tag').tag, depth: get('tag').depth },
+    },
+    blockers: blockers(drawn),
+  };
 }
 
+function sceneJewelry(g, t) {
+  g.drawImage(IMG['bg-jewelry'], 0, 0, W, H);
+  neon(g, 'DIAMOND MILE JEWELERS', 150, 88, 44, '#ff4fd8', flicker(t, 4));
+  const card = idCard(g, { x: 206, y: 590, w: 78, h: 48 });
+  // The crew only reach the car as the tape ends; the passing bus is the moment to catch them hidden.
+  const J = t >= 0.4 ? walk(t, 0.4, 11.2, { x: 360, y: 470, s: 0.82 }, { x: 905, y: 668, s: 1.12 }) : null;
+  const L = t >= 1.0 ? walk(t, 1.0, 11.6, { x: 470, y: 478, s: 0.84 }, { x: 1080, y: 672, s: 1.12 }) : null;
+  const R = t >= 2.2 ? walk(t, 2.2, 11.6, { x: 1340, y: 520, s: 0.9 }, { x: 760, y: 540, s: 0.92 }) : null;
+  const tourist = { x: 590, y: 560, s: 0.95, step: 0 };
+  const busP = seg(t, 5.8, 8.0);
+  const drawn = draw(g, [
+    { depth: tourist.y, draw: () => as('tourist', extra(g, 'bystander-tourist', tourist)) },
+    J && { depth: J.y, draw: () => as('jason', crew(g, 'jason', J)) },
+    L && { depth: L.y, draw: () => as('lucia', crew(g, 'lucia', L)) },
+    R && { depth: R.y, draw: () => as('rico', crew(g, 'rico', R)) },
+    { depth: 708, draw: () => {
+      const car = sprite(g, 'car-red-rear', 1000, 708, 380);
+      return { plate: plateIn(g, car.place, 'VC 2HOT'), body: car.rect };
+    } },
+    busP > 0 && busP < 1 && { depth: 770, draw: () => ({ body: sprite(g, 'bus-city', lerp(-1400, 1450, busP), 770, 1500).rect }) },
+  ]);
+  rain(g, t);
+  const pick = key => drawn.find(d => d[key]);
+  const person = key => pick(key) && { rect: pick(key)[key].face, depth: pick(key).depth };
+  return {
+    rects: {
+      jface: person('jason'),
+      lface: person('lucia'),
+      plate: { rect: pick('plate').plate, depth: pick('plate').depth },
+      rico: person('rico'),
+      tourist: person('tourist'),
+      card: { rect: card, depth: 638 },
+    },
+    blockers: blockers(drawn),
+  };
+}
+
+// Clocks shrink as the jobs get bigger; the tape's running time counts against the clock.
 export const CASES = [
   {
     id: 'kwik',
@@ -740,14 +460,19 @@ export const CASES = [
     place: 'Vice Beach',
     seconds: 90,
     payout: 12000,
-    brief: 'Jason hit the Kwik Mart on Ocean Drive and looked straight into the pump camera. Classic.',
-    draw: sceneKwikMart,
+    clip: 12,
+    preview: 4,
+    brief: 'Jason hit the Kwik Mart on Ocean Drive and walked straight past the pump camera to the getaway car.',
+    tip: 'Jason passes behind the canopy pillar on his way to the car.',
+    draw: sceneKwik,
     cam: 'CAM 04',
     camPlace: 'KWIK MART #117 · VICE BEACH',
     time: '02:13:44',
-    targets: (r) => [
-      { key: 'face', kind: 'hide', label: "Jason's face", rect: r.face },
+    targets: r => [
+      { key: 'face', kind: 'hide', label: "Jason's face", at: r.face },
+      { key: 'plate', kind: 'hide', label: 'Getaway car plate', at: r.plate },
     ],
+    surprise: r => ({ key: 'screen', kind: 'hide', label: "Jason on the store's security monitor", at: r.screen }),
   },
   {
     id: 'causeway',
@@ -755,32 +480,40 @@ export const CASES = [
     place: 'Leonida Causeway',
     seconds: 80,
     payout: 18000,
-    brief: 'Toll camera caught the getaway car at sunset. Lucia stepped out to stretch. Of course she did.',
+    clip: 12,
+    preview: 3.5,
+    brief: 'Toll camera caught the getaway car on the shoulder at sunset. Lucia stepped out to stretch. Of course she did.',
+    tip: 'A box truck blocks the lane for a split second. Catch it covering both the plate and Lucia.',
     draw: sceneCauseway,
     cam: 'TOLL 5A',
     camPlace: 'LEONIDA CAUSEWAY · EASTBOUND',
     time: '19:47:02',
-    targets: (r) => [
-      { key: 'plate', kind: 'hide', label: 'License plate', rect: r.plate },
-      { key: 'face', kind: 'hide', label: "Lucia's face", rect: r.face },
+    targets: r => [
+      { key: 'plate', kind: 'hide', label: 'License plate', at: r.plate },
+      { key: 'face', kind: 'hide', label: "Lucia's face", at: r.face },
     ],
+    surprise: r => ({ key: 'sticker', kind: 'hide', label: 'L+J sticker on the rear window', at: r.sticker }),
   },
   {
     id: 'bank',
     title: 'Bank of Leonida',
     place: 'Downtown Vice City',
-    seconds: 80,
+    seconds: 75,
     payout: 30000,
-    brief: "Lobby cam. Rico's crew was casing the same bank. Scrub Jason, lose Lucia's tattoo — and leave Rico's face for the cops.",
+    clip: 12,
+    preview: 11,
+    brief: "Lobby cam. Rico's crew was casing the same bank. Scrub Jason, lose Lucia's tattoo, and leave Rico's face for the cops.",
+    tip: 'Rico walks in late, and a guard crosses the lobby. Freeze after Rico is in the shot.',
     draw: sceneBank,
     cam: 'CAM 11',
     camPlace: 'BANK OF LEONIDA · LOBBY',
     time: '10:02:31',
-    targets: (r) => [
-      { key: 'jface', kind: 'hide', label: "Jason's face", rect: r.jface },
-      { key: 'tattoo', kind: 'hide', label: "Lucia's L+J tattoo", rect: r.tattoo },
-      { key: 'rico', kind: 'keep', label: "Rico's face (frame him)", rect: r.rico },
+    targets: r => [
+      { key: 'jface', kind: 'hide', label: "Jason's face", at: r.jface },
+      { key: 'tattoo', kind: 'hide', label: "Lucia's L+J tattoo", at: r.tattoo },
+      { key: 'rico', kind: 'keep', mustShow: true, label: "Rico's face (frame him)", at: r.rico },
     ],
+    surprise: r => ({ key: 'slip', kind: 'hide', label: "Jason's deposit slip on the glass", at: r.slip }),
   },
   {
     id: 'marina',
@@ -788,53 +521,46 @@ export const CASES = [
     place: 'Leonida Keys',
     seconds: 70,
     payout: 42000,
-    brief: 'Harbor patrol drone photo. The cash bag is on the dock and our boat reg is readable. Rico’s boat stays in shot.',
+    clip: 12,
+    preview: 8,
+    brief: 'Harbor patrol drone. The cash bag is on the dock and our boat registration is readable. Rico’s yacht has to be in the shot.',
+    tip: 'Wait for Rico’s yacht to pull in. A jet ski screams past our hull.',
     draw: sceneMarina,
     cam: 'DRONE 2',
     camPlace: 'HARBOR PATROL · LEONIDA KEYS',
     stampLabel: 'Drone timestamp',
     time: '14:26:10',
-    targets: (r) => [
-      { key: 'bag', kind: 'hide', label: 'Duffel bag of cash', rect: r.bag },
-      { key: 'reg', kind: 'hide', label: 'Boat registration', rect: r.reg },
-      { key: 'ricoBoat', kind: 'keep', label: "Rico's boat name", rect: r.ricoBoat },
+    targets: r => [
+      { key: 'bag', kind: 'hide', label: 'Duffel bag of cash', at: r.bag },
+      { key: 'reg', kind: 'hide', label: 'Boat registration', at: r.reg },
+      { key: 'ricoBoat', kind: 'keep', mustShow: true, label: "Rico's boat name", at: r.ricoBoat },
     ],
+    surprise: r => ({ key: 'tag', kind: 'hide', label: "Lucia's name tag on the duffel", at: r.tag }),
   },
   {
     id: 'jewelry',
     title: 'Diamond Mile',
     place: 'Vice City Strip',
-    seconds: 75,
+    seconds: 65,
     payout: 75000,
-    brief: 'The big one. Street cam saw everything. Three things to erase, and Rico takes the fall.',
+    clip: 12,
+    preview: 4.5,
+    brief: 'The big one. Street cam saw everything. Erase the crew and the plate, frame Rico, and leave the tourist alone.',
+    tip: 'A bus sweeps the street while the crew run for the car. Wait for Rico to come up the sidewalk first.',
     draw: sceneJewelry,
     cam: 'CAM 22',
     camPlace: 'DIAMOND MILE · VICE CITY',
     time: '03:58:17',
-    targets: (r) => [
-      { key: 'jface', kind: 'hide', label: "Jason's face", rect: r.jface },
-      { key: 'lface', kind: 'hide', label: "Lucia's face", rect: r.lface },
-      { key: 'plate', kind: 'hide', label: 'License plate', rect: r.plate },
-      { key: 'rico', kind: 'keep', label: "Rico's face (frame him)", rect: r.rico },
+    targets: r => [
+      { key: 'jface', kind: 'hide', label: "Jason's face", at: r.jface },
+      { key: 'lface', kind: 'hide', label: "Lucia's face", at: r.lface },
+      { key: 'plate', kind: 'hide', label: 'License plate', at: r.plate },
+      { key: 'rico', kind: 'keep', mustShow: true, label: "Rico's face (frame him)", at: r.rico },
+      { key: 'tourist', kind: 'keep', label: "Tourist's face (innocent)", at: r.tourist },
     ],
+    surprise: r => ({ key: 'card', kind: 'hide', label: "Jason's dropped ID card", at: r.card }),
   },
 ];
-
-// Full-size character portraits on a transparent canvas, for the home page.
-export const CHARACTERS = {
-  jason: { ...JASON, cap: null },
-  lucia: { ...LUCIA, tattoo: true, shirt: '#f2ede4', pants: '#2b4f8f' },
-  rico: { ...RICO },
-};
-
-export function renderCharacter(key, { blink = false, scale = 2.2 } = {}) {
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.round(175 * scale);
-  canvas.height = Math.round(345 * scale);
-  const g = canvas.getContext('2d');
-  person(g, { ...CHARACTERS[key], x: canvas.width / 2, y: canvas.height - 4, s: scale, blink }, rng(42));
-  return canvas.toDataURL('image/png');
-}
 
 export async function ensureFonts() {
   // Font/CDN failures must not leave the start button disabled forever.
@@ -845,28 +571,178 @@ export async function ensureFonts() {
     document.fonts.load('700 22px "IBM Plex Mono"'),
     document.fonts.load('700 30px Montserrat'),
     document.fonts.load('600 26px Montserrat'),
+    document.fonts.load('800 20px Montserrat'),
   ]);
   await Promise.all([
     loadAvatarArt(),
+    loadSceneArt(),
     Promise.race([fonts, new Promise(resolve => { timeout = setTimeout(resolve, 5000); })]),
   ]);
   clearTimeout(timeout);
 }
 
-// Renders a case to a canvas. Returns { canvas, dataUrl, targets }.
-export function renderCase(c, index) {
+// The burned-in clock runs with the tape.
+export function stampTime(c, t) {
+  const [h, m, s] = c.time.split(':').map(Number);
+  const total = h * 3600 + m * 60 + s + Math.floor(t);
+  const two = n => String(n).padStart(2, '0');
+  return `${two(Math.floor(total / 3600) % 24)}:${two(Math.floor(total / 60) % 60)}:${two(total % 60)}`;
+}
+
+function labels(g, c, t, rec = true) {
+  g.save();
+  g.font = '600 22px IBM Plex Mono, monospace';
+  g.textBaseline = 'middle';
+  g.fillStyle = 'rgba(0,0,0,0.55)';
+  g.fillRect(20, 18, g.measureText(`${c.cam}  ${c.camPlace}`).width + 28, 38);
+  g.fillStyle = '#e8ffe8';
+  g.fillText(`${c.cam}  ${c.camPlace}`, 34, 38);
+  if (rec) {
+    g.fillStyle = '#ff2b2b';
+    g.beginPath();
+    g.arc(W - 118, 38, 9, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.fillStyle = '#fff';
+  g.fillText('REC', W - 100, 38);
+  const stamp = `09/24/2026  ${stampTime(c, t)}  VCPD-NET`;
+  g.font = '600 24px IBM Plex Mono, monospace';
+  const box = { x: 20, y: H - 64, w: g.measureText('09/24/2026  00:00:00  VCPD-NET').width + 32, h: 44 };
+  g.fillStyle = 'rgba(0,0,0,0.6)';
+  g.fillRect(box.x, box.y, box.w, box.h);
+  g.fillStyle = '#e8ffe8';
+  g.fillText(stamp, box.x + 16, box.y + box.h / 2);
+  g.restore();
+  return { x: box.x - 4, y: box.y - 4, w: box.w + 8, h: box.h + 8 };
+}
+
+// Full CCTV treatment for a frozen still: per-pixel grain, scanlines, vignette, then the labels.
+function cctvStill(g, rand, c, t) {
+  const img = g.getImageData(0, 0, W, H);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rand() - 0.5) * 22;
+    const y = ((i / 4 / W) | 0) % 3 === 0 ? -10 : 0;
+    d[i] = Math.max(0, Math.min(255, d[i] * 0.92 + n + y));
+    d[i + 1] = Math.max(0, Math.min(255, d[i + 1] * 0.96 + n + y + 4));
+    d[i + 2] = Math.max(0, Math.min(255, d[i + 2] * 0.92 + n + y));
+  }
+  g.putImageData(img, 0, 0);
+  vignette(g);
+  return labels(g, c, t);
+}
+
+function vignette(g) {
+  const v = g.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.7);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.55)');
+  g.fillStyle = v;
+  g.fillRect(0, 0, W, H);
+}
+
+// Cheap live overlay for the playing tape: cached scanlines and grain frames instead of per-pixel work.
+let liveCache;
+function liveOverlay() {
+  if (liveCache) return liveCache;
+  const lines = Object.assign(document.createElement('canvas'), { width: W, height: H });
+  const lg = lines.getContext('2d');
+  lg.fillStyle = 'rgba(0,0,0,0.16)';
+  for (let y = 0; y < H; y += 3) lg.fillRect(0, y, W, 1);
+  vignette(lg);
+  const grain = [0, 1, 2, 3].map(k => {
+    const c = Object.assign(document.createElement('canvas'), { width: W / 4, height: H / 4 });
+    const cg = c.getContext('2d');
+    const img = cg.createImageData(c.width, c.height);
+    const rand = rng(90 + k);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = rand() * 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 34;
+    }
+    cg.putImageData(img, 0, 0);
+    return c;
+  });
+  liveCache = { lines, grain };
+  return liveCache;
+}
+
+// How much of a rect is on screen and not behind something nearer, sampled on a grid.
+// Returns the bounding box of the visible part and the visible share.
+function visibility(rect, depth, blocked) {
+  if (!rect || rect.w <= 0 || rect.h <= 0) return { rect: null, share: 0 };
+  const front = blocked.filter(b => b.depth > depth);
+  const N = 12;
+  let seen = 0;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const x = rect.x + ((i + 0.5) / N) * rect.w;
+      const y = rect.y + ((j + 0.5) / N) * rect.h;
+      if (x < 0 || y < 0 || x >= W || y >= H) continue;
+      if (front.some(b => x >= b.rect.x && x <= b.rect.x + b.rect.w && y >= b.rect.y && y <= b.rect.y + b.rect.h)) continue;
+      seen++;
+      x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+    }
+  }
+  const share = seen / (N * N);
+  const cw = rect.w / N / 2, ch = rect.h / N / 2;
+  return { share, rect: seen ? clampRect({ x: x0 - cw, y: y0 - ch, w: x1 - x0 + cw * 2, h: y1 - y0 + ch * 2 }) : null };
+}
+
+// Below this share a target is out of sight: hidden evidence needs no edit, a must-show KEEP counts as missing.
+const IN_SHOT = 0.3;
+
+// Draws frame `t` of case `c` onto `g` and classifies every target:
+// `targets` are in shot, `gone` are hidden evidence that needs no edit, `missing` are KEEPs that must show but don't.
+function frame(g, c, t) {
+  const { rects, blockers: blocked } = c.draw(g, t);
+  const classify = spec => {
+    const v = visibility(spec.at?.rect, spec.at?.depth ?? 0, blocked);
+    return { ...spec, rect: v.rect, share: v.share, inShot: v.share >= IN_SHOT };
+  };
+  const all = c.targets(rects).map(classify);
+  const surprise = c.surprise ? classify(c.surprise(rects)) : null;
+  return {
+    targets: all.filter(x => x.inShot).map(strip),
+    gone: all.filter(x => !x.inShot && !(x.kind === 'keep' && x.mustShow)).map(strip),
+    missing: all.filter(x => !x.inShot && x.kind === 'keep' && x.mustShow).map(strip),
+    surprise: surprise?.inShot ? strip(surprise) : null,
+    all,
+  };
+}
+const strip = ({ at: _at, share: _share, inShot: _inShot, ...target }) => target;
+
+// Draws a live frame for the playing tape, with the fast overlay. Returns every target's status.
+export function drawLive(g, c, t) {
+  const f = frame(g, c, t);
+  const { lines, grain } = liveOverlay();
+  g.drawImage(lines, 0, 0);
+  g.save();
+  g.imageSmoothingEnabled = false;
+  g.globalCompositeOperation = 'overlay';
+  g.drawImage(grain[Math.abs(Math.floor(t * 24)) % grain.length], 0, 0, W, H);
+  g.restore();
+  // Tracking glitch: a bright band rolls down the picture every few seconds.
+  const band = (t * 0.45) % 1;
+  if (band < 0.18) {
+    g.fillStyle = 'rgba(255,255,255,0.05)';
+    g.fillRect(0, (band / 0.18) * H - 30, W, 30);
+  }
+  const stamp = labels(g, c, t, Math.floor(t * 2) % 2 === 0);
+  return { ...f, stamp };
+}
+
+// Renders the frozen still at `t` for the lab: { canvas, dataUrl, targets, gone, missing, surprise, t }.
+export function renderCase(c, index, t = c.preview) {
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const g = canvas.getContext('2d', { willReadFrequently: true });
-  const rand = rng(1000 + index * 77);
-  const rects = c.draw(g, rand);
-  const stamp = cctv(g, rand, c.cam, c.camPlace, c.time);
-  const targets = [
-    ...c.targets(rects),
-    { key: 'stamp', kind: 'keep', label: c.stampLabel ?? 'CCTV timestamp', rect: stamp },
-  ].map((t) => ({ ...t, rect: clampRect(t.rect) }));
-  return { canvas, dataUrl: canvas.toDataURL('image/png'), targets };
+  const f = frame(g, c, t);
+  const stampRect = cctvStill(g, rng(1000 + index * 77), c, t);
+  const targets = [...f.targets, { key: 'stamp', kind: 'keep', label: c.stampLabel ?? 'CCTV timestamp', rect: stampRect }]
+    .map(x => ({ ...x, rect: clampRect(x.rect) }));
+  return { canvas, dataUrl: canvas.toDataURL('image/png'), targets, gone: f.gone, missing: f.missing, surprise: f.surprise && { ...f.surprise, rect: clampRect(f.surprise.rect) }, t };
 }
 
 function clampRect(r) {

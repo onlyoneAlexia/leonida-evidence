@@ -13,6 +13,8 @@ The Leonida crew illustrations were generated for this project with an AI image 
 | [`archive/leonida-crew-mobile.png`](archive/leonida-crew-mobile.png) | Portrait version of the original hero | Archived |
 | [`archive/evidence-studio.png`](archive/evidence-studio.png) | Original evidence studio | Archived |
 
+The CCTV backgrounds, vehicles, props and bystanders are covered separately in [CODEX-SCENES.md](CODEX-SCENES.md).
+
 `node scripts/optimize-art.mjs` converts the three v2 sources into the WebP files in `public/art/`. [OUTFITS-V2.md](OUTFITS-V2.md) covers the current outfits and their prompts; the prompts for the original illustrations are below.
 
 ## Original prompts

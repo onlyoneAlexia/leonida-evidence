@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import ImageEditor from '@unlayer/react-image-editor';
-import { CASES, W, H, ensureFonts, renderCase } from './scenes.js';
+import { CASES, W, H, drawLive, ensureFonts, renderCase } from './scenes.js';
 import { analyse } from './forensics.js';
 import { buildRapSheet, rankFor } from './rapsheet.js';
-import { isMuted, play, setMuted, subscribe, unlockAudio } from './sound.js';
+import { isMuted, play, setMuted, siren, subscribe, unlockAudio } from './sound.js';
+import { boardRows, postRun, useLeaderboard } from './leaderboard.js';
 import Home from './Home.jsx';
+import LeaderboardTable from './LeaderboardTable.jsx';
 import './App.css';
 
 const MAX_STARS = 5;
@@ -79,31 +81,127 @@ function SoundToggle() {
   );
 }
 
+// Walking away ends the run early; the rap sheet shows the jobs already finished.
+function QuitButton({ onQuit }) {
+  const dialog = useRef(null);
+  return (
+    <>
+      <button type="button" className="btn quit-toggle" onClick={() => dialog.current.showModal()}>Quit</button>
+      <dialog ref={dialog} className="quit-dialog" aria-labelledby="quit-title">
+        <h3 id="quit-title">Walk away from this run?</h3>
+        <p>You keep a rap sheet for the jobs you've finished. Runs you walk away from don't make the leaderboard.</p>
+        <form method="dialog" className="actions">
+          <button className="btn" autoFocus>Keep playing</button>
+          <button className="btn primary" onClick={onQuit}>Walk away</button>
+        </form>
+      </dialog>
+    </>
+  );
+}
+
 // What forensics reports on each evidence box: hidden evidence comes back CLEAN, visible evidence a MATCH.
 const forensicLabel = (r) => (r.kind === 'hide' ? (r.pass ? 'CLEAN' : 'MATCH') : r.pass ? 'INTACT' : 'TAMPERED');
 
-function Briefing({ index, c, scene, stars, cash, onGo }) {
+const clock = s => `${Math.floor(s / 60)}:${String(Math.max(0, s) % 60).padStart(2, '0')}`;
+
+// Heat pressure: every wanted star makes the next tape harder.
+const heatEffects = stars => [
+  stars >= 1 && 'Sirens',
+  stars >= 2 && 'Camera shake',
+  stars >= 3 && 'Stickers jammed',
+  stars >= 4 && 'Shapes jammed',
+].filter(Boolean);
+
+function HeatChips({ stars }) {
+  const effects = heatEffects(stars);
+  if (!effects.length) return null;
+  return <p className="heat-chips" aria-label={`Heat effects: ${effects.join(', ')}`}>{effects.map(e => <span key={e}>{e}</span>)}</p>;
+}
+
+const liveStatus = t => (t.inShot ? 'in shot' : t.kind === 'keep' && t.mustShow ? 'not in shot' : 'out of sight');
+
+// The tape plays live and FREEZE picks the frame to doctor. The job clock runs from the moment the tape rolls,
+// so waiting for a better frame costs editing time.
+function Feed({ index, c, stars, cash, onFreeze, onQuit }) {
+  const canvas = useRef(null);
+  const tRef = useRef(0);
+  const frozen = useRef(false);
+  const [done, setDone] = useState(false);
+  const [rolling, setRolling] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const [live, setLive] = useState({ t: 0, all: [] });
+
+  useEffect(() => {
+    setLive({ t: 0, all: drawLive(canvas.current.getContext('2d'), c, 0).all });
+  }, [c]);
+
+  const freeze = useCallback(() => {
+    if (frozen.current) return;
+    frozen.current = true;
+    setDone(true);
+    setRolling(false);
+    setFlash(true);
+    play('shutter');
+    setTimeout(() => onFreeze(tRef.current), 220);
+  }, [onFreeze]);
+
+  useEffect(() => {
+    if (!rolling) return;
+    const g = canvas.current.getContext('2d');
+    const start = performance.now();
+    let raf;
+    let frames = 0;
+    const loop = now => {
+      // A frame's timestamp can predate `start` slightly, so never let the tape run backwards.
+      const t = Math.max(0, Math.min(c.clip, (now - start) / 1000));
+      tRef.current = t;
+      const f = drawLive(g, c, t);
+      // Boxes follow the crew at 30 fps; the picture itself runs at the display rate.
+      if (frames++ % 2 === 0 || t >= c.clip) setLive({ t, all: f.all });
+      if (t >= c.clip) freeze();
+      else raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    const onKey = event => { if (event.code === 'Space' && !event.target.closest('input, textarea, dialog')) { event.preventDefault(); freeze(); } };
+    document.addEventListener('keydown', onKey);
+    return () => { cancelAnimationFrame(raf); document.removeEventListener('keydown', onKey); };
+  }, [rolling, c, freeze]);
+
+  const roll = () => { unlockAudio(); play('tick'); setRolling(true); };
+  const shown = live.all.filter(t => t.inShot && t.rect);
   return (
-    <div className="screen briefing">
+    <div className={`screen briefing ${stars >= 1 ? 'heat-sirens' : ''}`}>
       <div className="brief-card">
         <div className="brief-head">
           <span className="case-no">CASE {index + 1} / {CASES.length}</span>
           <Stars count={stars} />
           <span className="cash">{money(cash)}</span>
           <SoundToggle />
+          <QuitButton onQuit={onQuit} />
         </div>
         <h2>{c.title}</h2>
         <p className="place">{c.place}</p>
         <div className="brief-body">
-          <div className="evidence-photo">
-            <img src={scene.dataUrl} alt={`CCTV still: ${c.title}`} />
-            <TargetBoxes targets={scene.targets} />
+          <div className={`evidence-photo feed ${rolling ? 'rolling' : ''} ${flash ? 'flash' : ''}`}>
+            <canvas ref={canvas} width={W} height={H} data-t={live.t.toFixed(2)} aria-label={`Live CCTV tape: ${c.title}`} role="img" />
+            <TargetBoxes targets={shown} />
+            {!rolling && !done && <button type="button" className="roll-tape" onClick={roll}><span aria-hidden="true">▶</span> Roll tape</button>}
+            {rolling && <div className="tape-bar" aria-hidden="true"><i style={{ width: `${(live.t / c.clip) * 100}%` }} /></div>}
           </div>
           <div className="brief-side">
             <p className="brief-text">{c.brief}</p>
-            <ObjectiveList targets={scene.targets} />
-            <p className="clock">⏱ {c.seconds} seconds · payout up to {money(c.payout)}</p>
-            <button className="btn primary" onClick={onGo}>Start doctoring</button>
+            <p className="tape-tip"><b>Timing:</b> {c.tip} Evidence that's out of sight when you freeze needs no edit.</p>
+            <ul className="objectives live">
+              {live.all.map(t => (
+                <li key={t.key} className={`${t.kind} ${t.inShot ? '' : 'away'}`}>
+                  <b>{t.kind === 'hide' ? 'HIDE' : 'KEEP'}</b><span>{t.label}</span><em>{liveStatus(t)}</em>
+                </li>
+              ))}
+            </ul>
+            <HeatChips stars={stars} />
+            <p className="clock">⏱ {clock(c.seconds - Math.floor(live.t))} on the clock · payout up to {money(c.payout)}</p>
+            {rolling ? <button className="btn primary freeze" onClick={freeze}>Freeze frame <kbd>Space</kbd></button>
+              : <button className="btn primary" onClick={roll} disabled={done}>Roll tape</button>}
           </div>
         </div>
       </div>
@@ -114,7 +212,7 @@ function Briefing({ index, c, scene, stars, cash, onGo }) {
 function TargetBoxes({ targets, results }) {
   return (
     <div className="boxes">
-      {(results ?? targets).map((t) => (
+      {(results ?? targets).filter((t) => t.rect).map((t) => (
         <div
           key={t.key}
           className={`box ${t.kind} ${results ? (t.pass ? 'pass' : 'fail') : ''}`}
@@ -132,30 +230,51 @@ function TargetBoxes({ targets, results }) {
   );
 }
 
-function ObjectiveList({ targets, results }) {
-  const list = results ?? targets;
+function ObjectiveList({ targets, results, gone = [], missing = [], fresh }) {
+  const list = results ?? [...targets, ...missing.map((t) => ({ ...t, missing: true }))];
   return (
     <ul className="objectives">
       {list.map((t) => (
-        <li key={t.key} className={`${t.kind} ${results ? (t.pass ? 'pass' : 'fail') : ''}`}>
+        <li key={t.key} className={`${t.kind} ${results ? (t.pass ? 'pass' : 'fail') : ''} ${t.key === fresh ? 'fresh' : ''} ${t.missing && !results ? 'missing' : ''}`}>
           <b>{t.kind === 'hide' ? 'HIDE' : 'KEEP'}</b>
           <span>{t.label}</span>
-          {results && (
+          {results ? (
             <em>
-              {t.kind === 'hide'
-                ? t.pass ? `scrubbed ${Math.round(t.changed * 100)}%` : `visible (${Math.round(t.changed * 100)}% hidden)`
-                : t.pass ? 'intact' : `tampered ${Math.round(t.changed * 100)}%`}
+              {t.missing ? 'not in the shot'
+                : t.kind === 'hide'
+                  ? t.pass ? `scrubbed ${Math.round(t.changed * 100)}%` : `visible (${Math.round(t.changed * 100)}% hidden)`
+                  : t.pass ? 'intact' : `tampered ${Math.round(t.changed * 100)}%`}
             </em>
-          )}
+          ) : t.missing && <em>not in the shot. Forensics will notice.</em>}
+        </li>
+      ))}
+      {!results && gone.map((t) => (
+        <li key={t.key} className={`${t.kind} gone`}>
+          <b>{t.kind === 'hide' ? 'HIDE' : 'KEEP'}</b>
+          <span>{t.label}</span>
+          <em>out of sight: no edit needed</em>
         </li>
       ))}
     </ul>
   );
 }
 
-function Lab({ index, c, scene, stars, cash, onSubmit }) {
+// Detectives spot something new this far into the edit, and add a little time to deal with it.
+const SURPRISE_AFTER = 6000;
+// No more than the lab has used by then, so the bonus never lifts the clock past this tape's budget.
+const SURPRISE_BONUS = 5;
+const SHAKE_EVERY = 13000;
+
+function Lab({ index, c, still, budget, stars, cash, onSubmit, onQuit }) {
   const editorRef = useRef(null);
-  const [left, setLeft] = useState(c.seconds);
+  const [left, setLeft] = useState(budget);
+  const [revealed, setRevealed] = useState(false);
+  const [shaking, setShaking] = useState(false);
+  const options = useMemo(() => ({
+    ...EDITOR_OPTIONS,
+    features: { ...EDITOR_OPTIONS.features, imageEditor: { tools: { ...EDITOR_OPTIONS.features.imageEditor.tools, ...(stars >= 3 && { stickers: false }), ...(stars >= 4 && { shapes: false }) } } },
+  }), [stars]);
+  const targets = useMemo(() => (revealed ? [...still.targets, still.surprise] : still.targets), [revealed, still]);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
   const [editorAttempt, setEditorAttempt] = useState(0);
@@ -167,7 +286,10 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
   const labRef = useRef(null);
   const wrapRef = useRef(null);
   const done = useRef(false);
-  const remaining = useRef(c.seconds);
+  const remaining = useRef(budget);
+  const deadline = useRef(0);
+  const readyAt = useRef(0);
+  const revealedRef = useRef(false);
 
   const failEditor = useCallback(() => {
     setReady(false);
@@ -256,27 +378,44 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
         const img = dataUrl ?? editorRef.current?.editor?.getImage();
         if (!img) throw new Error('No image available');
         play('shutter');
-        onSubmit(img, left, reason);
+        onSubmit(img, left, reason, targets);
       } catch {
         done.current = false;
         setReady(false);
         setError('Your edit could not be exported. Retry the editor to reload this tape. Your timer is paused.');
       }
     },
-    [left, onSubmit],
+    [left, onSubmit, targets],
   );
 
   useEffect(() => {
     if (!ready) return;
-    const deadline = Date.now() + remaining.current * 1000;
+    deadline.current = Date.now() + remaining.current * 1000;
+    readyAt.current ||= Date.now();
+    if (stars >= 1) siren();
     const tick = () => {
-      remaining.current = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      // The surprise lands a few seconds into the edit, with bonus time that never exceeds this tape's budget.
+      if (still.surprise && !revealedRef.current && Date.now() - readyAt.current >= SURPRISE_AFTER) {
+        revealedRef.current = true;
+        setRevealed(true);
+        play('alert');
+        deadline.current = Math.min(Date.now() + budget * 1000, deadline.current + SURPRISE_BONUS * 1000);
+      }
+      remaining.current = Math.max(0, Math.ceil((deadline.current - Date.now()) / 1000));
       setLeft(remaining.current);
     };
     const t = setInterval(tick, 250);
     document.addEventListener('visibilitychange', tick);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
-  }, [ready]);
+  }, [ready, stars, still.surprise, budget]);
+
+  // Two or more stars: the camera jolts every few seconds.
+  useEffect(() => {
+    if (!ready || stars < 2) return;
+    let off;
+    const jolt = setInterval(() => { setShaking(true); off = setTimeout(() => setShaking(false), 450); }, SHAKE_EVERY);
+    return () => { clearInterval(jolt); clearTimeout(off); };
+  }, [ready, stars]);
 
   useEffect(() => {
     if (ready && left === 0) submit(null, 'timeout');
@@ -289,9 +428,10 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
 
   const hurry = left <= 10;
   return (
-    <div ref={labRef} className={`screen lab ${hurry ? 'hurry' : ''} ${expanded ? 'workspace-expanded' : ''}`}>
+    <div ref={labRef} className={`screen lab ${hurry ? 'hurry' : ''} ${expanded ? 'workspace-expanded' : ''} ${stars >= 1 ? 'heat-sirens' : ''} ${shaking ? 'shake' : ''}`}>
       <div className="hud">
         <div className="hud-left">
+          <QuitButton onQuit={onQuit} />
           <span className="case-no">CASE {index + 1}</span>
           <strong>{c.title}</strong>
           <Stars count={stars} />
@@ -304,6 +444,7 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
           Send to evidence →
         </button>
       </div>
+      {revealed && <div className="enhance" role="alert"><b>ENHANCE</b> Detectives spotted something new: {still.surprise.label}. Hide it too. <em>+{SURPRISE_BONUS}s</em></div>}
       <div className="workspace-controls" role="group" aria-label="Editing workspace">
         <button className="btn" aria-controls="lab-orders" aria-expanded={ordersOpen && !expanded} disabled={expanded} onClick={() => setOrdersOpen(open => !open)}>{ordersOpen && !expanded ? 'Hide orders' : 'Show orders'}</button>
         <button className="btn" disabled={!ready || !hasToolSettings} aria-expanded={hasToolSettings && !toolsCollapsed} onClick={() => setToolsCollapsed(collapsed => !collapsed)}>{toolsCollapsed ? 'Show tool settings' : 'Hide tool settings'}</button>
@@ -314,10 +455,11 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
       <div className={`lab-body ${!ordersOpen || expanded ? 'orders-hidden' : ''}`}>
         <aside id="lab-orders" className="lab-side" hidden={!ordersOpen || expanded}>
           <h3>Orders</h3>
-          <ObjectiveList targets={scene.targets} />
+          <ObjectiveList targets={targets} gone={still.gone} missing={still.missing} fresh={revealed ? still.surprise.key : null} />
+          <HeatChips stars={stars} />
           <div className="mini">
-            <img src={scene.dataUrl} alt="" />
-            <TargetBoxes targets={scene.targets} />
+            <img src={still.dataUrl} alt="" />
+            <TargetBoxes targets={targets} />
           </div>
           <h3>Fixer tips</h3>
           <ul className="tips">
@@ -338,8 +480,8 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
           {!error && <ImageEditor
             key={editorAttempt}
             ref={editorRef}
-            image={scene.dataUrl}
-            options={EDITOR_OPTIONS}
+            image={still.dataUrl}
+            options={options}
             minHeight={0}
             onLoad={setMountedEditor}
             onSave={({ dataUrl }) => submit(dataUrl, 'save')}
@@ -347,7 +489,7 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
               const editor = editorRef.current?.editor;
               setReady(false);
               setMountedEditor(null);
-              try { await editor?.reset(scene.dataUrl); setMountedEditor(editor); }
+              try { await editor?.reset(still.dataUrl); setMountedEditor(editor); }
               catch { failEditor(); }
             }}
             onError={failEditor}
@@ -363,10 +505,11 @@ function Lab({ index, c, scene, stars, cash, onSubmit }) {
 const SCAN_LEAD = 400;
 const SCAN_STEP = 420;
 
-function Verdict({ index, scene, entry, stars, cash, onNext }) {
+function Verdict({ index, entry, stars, cash, onNext, onQuit }) {
   const { analysis } = entry;
   const { results } = analysis;
   const [checked, setChecked] = useState(0);
+  const [compare, setCompare] = useState(50);
   const scanning = checked <= results.length;
   const scanMs = SCAN_LEAD + results.length * SCAN_STEP;
   const allHidden = results.filter((r) => r.kind === 'hide').every((r) => r.pass);
@@ -398,6 +541,7 @@ function Verdict({ index, scene, entry, stars, cash, onNext }) {
           <Stars count={stars} prev={Math.max(0, stars - entry.heat)} delay={scanMs / 1000 + 0.3} />
           <span className="cash"><CountUp from={cash - entry.total} to={cash} delay={scanMs + 100} /></span>
           <SoundToggle />
+          <QuitButton onQuit={onQuit} />
         </div>
         <div className="verdict-body">
           <div className={`evidence-photo doctored ${scanning ? 'scanning' : busted ? 'busted' : ''}`}>
@@ -411,7 +555,14 @@ function Verdict({ index, scene, entry, stars, cash, onNext }) {
                 height: `${(analysis.size.h / H) * 100}%`,
               }}
             />
-            <TargetBoxes targets={scene.targets} results={results.slice(0, checked)} />
+            {!scanning && <>
+              <img className="verdict-original" src={entry.still.dataUrl} alt="Original CCTV still" style={{ clipPath: `inset(0 ${100 - compare}% 0 0)` }} />
+              <span className="compare-label compare-original" aria-hidden="true">ORIGINAL</span>
+              <span className="compare-label compare-edited" aria-hidden="true">YOUR EDIT</span>
+              <span className="compare-divider" style={{ left: `${compare}%` }} aria-hidden="true"><span>↔</span></span>
+              <input className="compare-range" type="range" min="0" max="100" value={compare} onChange={event => setCompare(Number(event.target.value))} aria-label="Compare original and doctored evidence" />
+            </>}
+            <TargetBoxes results={results.slice(0, checked)} />
             {scanning && <div className="scanline" />}
             {busted && !scanning && <p className="busted-stamp"><span>BUSTED</span></p>}
           </div>
@@ -432,7 +583,7 @@ function Verdict({ index, scene, entry, stars, cash, onNext }) {
                 {analysis.unrecognisable && (
                   <p className="note">That still no longer matches the tape. The detectives are asking questions.</p>
                 )}
-                <ObjectiveList targets={scene.targets} results={results} />
+                <ObjectiveList results={results} />
                 <dl className="ledger">
                   <dt>Job payout</dt><dd className={entry.base ? undefined : 'bad'}>{money(entry.base)}</dd>
                   <dt>Time bonus ({entry.left}s left)</dt><dd className={entry.timeBonus ? undefined : 'bad'}>{money(entry.timeBonus)}</dd>
@@ -451,12 +602,12 @@ function Verdict({ index, scene, entry, stars, cash, onNext }) {
   );
 }
 
-function RapSheet({ alias, history, stars, cash, onReplay }) {
+function RapSheet({ alias, history, stars, cash, walked, onReplay }) {
   const [poster, setPoster] = useState(null);
   const [posterError, setPosterError] = useState(false);
   const [printAttempt, setPrintAttempt] = useState(0);
   const busted = stars >= MAX_STARS;
-  const rank = useMemo(() => rankFor(stars, busted, history.length), [stars, busted, history.length]);
+  const rank = useMemo(() => rankFor(stars, busted, history.length, walked), [stars, busted, history.length, walked]);
   useEffect(() => {
     let active = true;
     let url;
@@ -479,7 +630,7 @@ function RapSheet({ alias, history, stars, cash, onReplay }) {
   return (
     <div className="screen rapsheet">
       <div className="rap-inner">
-        <p className="kicker">{busted ? 'The VCPD caught up with you' : 'All tapes processed'}</p>
+        <p className="kicker">{busted ? 'The VCPD caught up with you' : walked ? 'You walked away' : 'All tapes processed'}</p>
         <h2 className="logo small"><span>{rank.title}</span></h2>
         <p className="lede">{rank.line}</p>
         <div className="poster-slot">
@@ -492,8 +643,44 @@ function RapSheet({ alias, history, stars, cash, onReplay }) {
           <a className="btn" href={`https://twitter.com/intent/tweet?text=${tweet}`} target="_blank" rel="noreferrer">Share on X</a>
           <button className="btn" onClick={onReplay}>Run it back</button>
         </div>
+        <Leaderboard alias={alias} history={history} eligible={!busted && !walked && history.length === CASES.length} walked={walked} />
       </div>
     </div>
+  );
+}
+
+// Finished runs can be posted once; busted runs only see the board.
+function Leaderboard({ alias, history, eligible, walked }) {
+  const [{ board, error }, setBoard] = useLeaderboard();
+  const [fixer, setFixer] = useState(alias);
+  const [post, setPost] = useState({ sending: false, entry: null, error: '' });
+  const send = async (event) => {
+    event.preventDefault();
+    setPost({ sending: true, entry: null, error: '' });
+    try {
+      const { entry, ...latest } = await postRun(fixer, history);
+      setBoard(latest);
+      setPost({ sending: false, entry, error: '' });
+    } catch (e) {
+      setPost({ sending: false, entry: null, error: e.message });
+    }
+  };
+  const total = board?.total ?? 0;
+  return (
+    <section className="board-panel" aria-labelledby="board-title">
+      <h3 id="board-title">Top fixers</h3>
+      {!eligible ? <p className="board-note">{walked ? 'Runs you walk away from' : "Busted runs"} don't make the board. Finish all five jobs to post your cash and time.</p>
+        : post.entry ? <p className="board-note" role="status">Posted. <b>{post.entry.name}</b> is <b>#{post.entry.rank}</b> of {total}.</p>
+          : (
+            <form className="board-post" onSubmit={send}>
+              <label>Name on the board<input value={fixer} maxLength={18} onChange={e => setFixer(e.target.value)} autoComplete="nickname" /></label>
+              <button className="btn primary" disabled={post.sending}>{post.sending ? 'Posting…' : 'Post to leaderboard'}</button>
+            </form>
+          )}
+      {post.error && <p className="board-note bad" role="alert">{post.error}</p>}
+      {board?.top.length ? <LeaderboardTable className="board" rows={boardRows(board, post.entry)} highlight={post.entry?.id} />
+        : <p className="board-note">{board ? 'No clean runs yet. Yours could be the first.' : error || 'Loading the board…'}</p>}
+    </section>
   );
 }
 
@@ -502,8 +689,9 @@ function scoreCase(c, analysis, left) {
   const hides = analysis.results.filter((r) => r.kind === 'hide');
   const hidden = hides.filter((r) => r.pass).length;
   const heat = analysis.results.filter((r) => !r.pass).length;
-  const base = Math.round((c.payout * hidden) / hides.length);
-  const timeBonus = hidden ? Math.round(left * 40 * (hidden / hides.length)) : 0;
+  const share = hides.length ? hidden / hides.length : 1;
+  const base = Math.round(c.payout * share);
+  const timeBonus = share ? Math.round(left * 40 * share) : 0;
   const cleanBonus = heat === 0 ? Math.round(c.payout * 0.25 * analysis.subtle) : 0;
   return { base, timeBonus, cleanBonus, heat, total: base + timeBonus + cleanBonus };
 }
@@ -518,6 +706,8 @@ export default function App() {
   const [alias, setAlias] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [gameError, setGameError] = useState('');
+  const [walked, setWalked] = useState(false);
+  const [still, setStill] = useState(null);
   const submission = useRef(null);
 
   useEffect(() => {
@@ -529,22 +719,30 @@ export default function App() {
   }, []);
 
   const c = CASES[index];
-  const scene = scenes?.[index];
+
+  // The frozen frame becomes this tape's still; the tape's running time is already off the clock.
+  const onFreeze = useCallback((t) => {
+    setStill({ ...renderCase(c, index, t), used: Math.min(c.seconds, Math.ceil(t)) });
+    setPhase('lab');
+  }, [c, index]);
 
   const onSubmit = useCallback(
-    async (edited, left, reason) => {
-      submission.current = { edited, left, reason };
+    async (edited, left, reason, targets) => {
+      submission.current = { edited, left, reason, targets };
       setPhase('analysing');
       let analysis;
-      try { analysis = await analyse(scene.canvas, edited, scene.targets); }
+      try { analysis = await analyse(still.canvas, edited, targets); }
       catch { setPhase('analysis-error'); return; }
+      // A KEEP that had to be in the shot but wasn't counts against you.
+      const missing = still.missing.map((t) => ({ ...t, missing: true, pass: false, changed: 0, cells: [] }));
+      analysis = { ...analysis, results: [...analysis.results, ...missing] };
       const s = scoreCase(c, analysis, left);
       setStars((x) => Math.min(MAX_STARS, x + s.heat));
       setCash((x) => x + s.total);
-      setHistory((h) => [...h, { id: c.id, title: c.title, edited, analysis, left, reason, ...s }]);
+      setHistory((h) => [...h, { id: c.id, title: c.title, edited, still, analysis, left, reason, ...s }]);
       setPhase('verdict');
     },
-    [c, scene],
+    [c, still],
   );
 
   const next = () => {
@@ -555,24 +753,38 @@ export default function App() {
     }
   };
 
-  const restart = () => {
+  const reset = () => {
     setIndex(0);
     setStars(0);
     setCash(0);
     setHistory([]);
+    setWalked(false);
     setAttempt((a) => a + 1);
+  };
+  const restart = () => {
+    reset();
     setPhase('briefing');
+  };
+  // With nothing finished there is no rap sheet to show, so quitting goes back to the title.
+  const quit = () => {
+    if (history.length) {
+      setWalked(true);
+      setPhase('end');
+    } else {
+      reset();
+      setPhase('title');
+    }
   };
 
   const name = alias.trim() || 'The Cleaner';
 
   if (gameError) return <div className="screen center"><div role="alert"><p>{gameError}</p><button className="btn primary" onClick={() => window.location.reload()}>Reload game</button></div></div>;
-  if (phase === 'analysis-error') return <div className="screen center"><div role="alert"><p>Forensics could not read the submitted image. Your score has not changed.</p><button className="btn primary" onClick={() => { const last = submission.current; onSubmit(last.edited, last.left, last.reason); }}>Retry forensics</button><button className="btn" onClick={() => { setAttempt(n => n + 1); setPhase('briefing'); }}>Redo this tape</button></div></div>;
+  if (phase === 'analysis-error') return <div className="screen center"><div role="alert"><p>Forensics could not read the submitted image. Your score has not changed.</p><button className="btn primary" onClick={() => { const last = submission.current; onSubmit(last.edited, last.left, last.reason, last.targets); }}>Retry forensics</button><button className="btn" onClick={() => { setAttempt(n => n + 1); setPhase('briefing'); }}>Redo this tape</button></div></div>;
 
   if (phase === 'title') return <Home ready={!!scenes} scenes={scenes} alias={alias} setAlias={setAlias} onStart={() => { unlockAudio(); window.scrollTo(0, 0); setPhase('briefing'); }} />;
-  if (phase === 'briefing') return <Briefing index={index} c={c} scene={scene} stars={stars} cash={cash} onGo={() => { unlockAudio(); setPhase('lab'); }} />;
-  if (phase === 'lab') return <Lab key={`${attempt}-${index}`} index={index} c={c} scene={scene} stars={stars} cash={cash} onSubmit={onSubmit} />;
+  if (phase === 'briefing') return <Feed key={`${attempt}-${index}`} index={index} c={c} stars={stars} cash={cash} onFreeze={onFreeze} onQuit={quit} />;
+  if (phase === 'lab') return <Lab key={`${attempt}-${index}`} index={index} c={c} still={still} budget={c.seconds - still.used} stars={stars} cash={cash} onSubmit={onSubmit} onQuit={quit} />;
   if (phase === 'analysing') return <div className="screen center"><p className="stamp-text">Uploading to VCPD evidence…</p></div>;
-  if (phase === 'verdict') return <Verdict key={index} index={index} scene={scene} entry={history[history.length - 1]} stars={stars} cash={cash} onNext={next} />;
-  return <RapSheet alias={name} history={history} stars={stars} cash={cash} onReplay={restart} />;
+  if (phase === 'verdict') return <Verdict key={index} index={index} entry={history[history.length - 1]} stars={stars} cash={cash} onNext={next} onQuit={quit} />;
+  return <RapSheet alias={name} history={history} stars={stars} cash={cash} walked={walked} onReplay={restart} />;
 }

@@ -11,7 +11,7 @@ p.on('response', async r => {
 });
 await p.goto('http://localhost:5199/');
 await p.getByText('Open the evidence locker').click({ timeout: 20000 });
-await p.getByText('Start doctoring').click();
+await p.locator('.brief-side').getByRole('button', { name: 'Roll tape', exact: true }).click(); await p.getByRole('button', { name: /Freeze frame/ }).click();
 await p.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'), null, { timeout: 30000 });
 await p.waitForTimeout(4000);
 const txt = await p.locator('.editor-wrap').innerText();

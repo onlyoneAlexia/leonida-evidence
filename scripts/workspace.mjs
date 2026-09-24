@@ -25,7 +25,8 @@ try {
     await page.goto(process.env.HOME_TEST_URL || 'http://127.0.0.1:5201');
     await page.waitForSelector('.ler-play button:not([disabled])');
     await page.locator('.ler-play button').click();
-    await page.getByRole('button', { name: 'Start doctoring', exact: true }).click();
+    await page.locator('.brief-side').getByRole('button', { name: 'Roll tape', exact: true }).click();
+    await page.getByRole('button', { name: /Freeze frame/ }).click();
     await page.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'), null, { timeout: 60000 });
     const canvas = page.locator('canvas.upper-canvas');
     const initial = (await canvas.boundingBox()).width;
@@ -75,7 +76,7 @@ try {
     if (width === 1000) await page.getByRole('button', { name: 'Full screen', exact: true }).click();
     await page.getByRole('button', { name: /Send to evidence/ }).click();
     await page.waitForSelector('.ledger');
-    assert.notEqual(await page.locator('.verdict .evidence-photo img').getAttribute('src'), beforeBlur, 'Open filter panel reaches the submission');
+    assert.notEqual(await page.locator('.verdict .evidence-photo > img:not(.verdict-original)').getAttribute('src'), beforeBlur, 'Open filter panel reaches the submission');
     assert.equal(await page.evaluate(() => document.fullscreenElement), null);
     assert.deepEqual(errors, []);
     console.log(`PASS ${width}px: canvas widths ${initial}/${panelOpen}/${panelClosed}; drawing while collapsed, brush retained, fullscreen without edit loss, tool switching, submission`);

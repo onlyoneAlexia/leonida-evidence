@@ -27,7 +27,9 @@ SOUND EFFECTS
 
 ARTWORK
   Illustrations generated for this project from character references
-  supplied by the author. The CCTV scenes are drawn in code.
+  supplied by the author. CCTV backgrounds, vehicles, props and bystanders
+  generated for this project with OpenAI image generation through Codex.
+  Plates, lettering, signs and small evidence are drawn in code.
 
 TRADEMARKS
   The Unlayer name and logo are trademarks of Unlayer and appear only to

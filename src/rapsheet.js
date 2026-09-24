@@ -1,6 +1,7 @@
 // Composes the shareable end-of-run poster.
 
-export function rankFor(stars, busted, cases) {
+export function rankFor(stars, busted, cases, walked = false) {
+  if (walked) return { title: 'Walked Away', line: `You bailed after ${cases} job${cases === 1 ? '' : 's'}. The crew is keeping your cut of the rest.` };
   if (busted) return { title: 'Guest of the State', line: `Five stars after ${cases} case${cases === 1 ? '' : 's'}. Lucia and Jason are not returning your calls.` };
   if (stars === 0) return { title: 'Ghost of Leonida', line: 'Not a single frame traced back to the crew. The VCPD has nothing.' };
   if (stars <= 2) return { title: 'Vice City Fixer', line: 'A few loose ends, but the crew walks. Rico is sweating.' };
