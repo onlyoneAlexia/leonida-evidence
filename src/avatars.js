@@ -66,19 +66,20 @@ export function drawAvatar(g, options) {
   if (!atlas || !sprite) return null;
 
   const cellWidth = atlas.naturalWidth / 4;
-  const height = 340 * (options.s ?? 1);
-  const width = height * cellWidth / atlas.naturalHeight;
+  // `breath` stretches the pose a touch from the feet up; `squash` narrows it while turning to or from the camera.
+  const height = 340 * (options.s ?? 1) * (options.breath ?? 1);
+  const width = 340 * (options.s ?? 1) * cellWidth / atlas.naturalHeight * (options.squash ?? 1);
   const x = options.x - width / 2;
   const y = options.y - height;
+  const face = mappedRect(sprite.face, x, y, width, height);
+  const tattoo = options.tattoo && sprite.tattoo ? mappedRect(sprite.tattoo, x, y, width, height) : null;
   g.save();
+  g.globalAlpha *= options.alpha ?? 1;
   g.imageSmoothingEnabled = true;
   g.imageSmoothingQuality = 'high';
   g.drawImage(atlas, sprite.column * cellWidth, 0, cellWidth, atlas.naturalHeight, x, y, width, height);
-  g.restore();
-
-  const face = mappedRect(sprite.face, x, y, width, height);
-  const tattoo = options.tattoo && sprite.tattoo ? mappedRect(sprite.tattoo, x, y, width, height) : null;
   if (tattoo) drawTattoo(g, tattoo);
+  g.restore();
   return { face, tattoo };
 }
 

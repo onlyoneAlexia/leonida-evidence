@@ -85,6 +85,14 @@
 .ler-hud > span, .ler-hud small { font: 9px 'IBM Plex Mono',monospace; letter-spacing: .14em; }
 .ler-hud b { font-size: 29px; letter-spacing: 4px; line-height: 1; }
 .ler-hud i { height: 7px; width: 95%; background: linear-gradient(90deg,#f67bc6 75%,#68e1df 75%); border: 1px solid #393169; }
+/* The live #1 mirrors the heat HUD from the opposite corner, styled like a GTA cash readout. */
+.ler-top-fixer { position: absolute; top: max(11%, 96px); right: 10.5%; display: grid; justify-items: end; gap: 4px; max-width: min(240px, 20%); text-align: right; transform: rotate(3deg); text-shadow: 1px 2px 4px #392742; animation: ler-drop .6s .5s cubic-bezier(.2,1.3,.4,1) both; transition: transform .18s; }
+.ler-top-fixer:hover { transform: rotate(3deg) translateY(-2px); }
+.ler-top-fixer > span { display: flex; align-items: center; gap: 6px; font: 9px 'IBM Plex Mono',monospace; letter-spacing: .14em; }
+.ler-top-fixer i { width: 7px; height: 7px; border-radius: 50%; background: #68e1df; box-shadow: 0 0 0 2px #39316999, 0 0 8px #68e1df; animation: ler-live 1.4s steps(2) infinite; }
+.ler-top-fixer b { font: 400 34px/1 Anton,Impact,sans-serif; letter-spacing: .02em; color: #a8f7c8; -webkit-text-stroke: 1px #302454; text-shadow: 2px 3px 0 #302454; }
+.ler-top-fixer small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 800 11px/1.4 Montserrat,sans-serif; letter-spacing: .04em; text-transform: uppercase; text-decoration: underline; text-underline-offset: 3px; }
+.ler-top-fixer:hover small { color: #ffe3a6; }
 .ler-location { position: absolute; bottom: 8%; right: 5%; display: grid; gap: 5px; text-align: right; text-shadow: 1px 2px 6px #302454; }
 .ler-location span { font: 9px 'IBM Plex Mono',monospace; }
 .ler-location b { font-size: 11px; }
@@ -172,7 +180,10 @@
 .ler-footer small { width: 100%; font-size: 9px; opacity: .8; }
 .ler-footer small a { text-decoration: underline; text-underline-offset: 3px; }
 .ler-footer small a:hover { color: #ffe3a6; }
-.ler-leaders { padding: 38px 7% 70px; text-align: center; background-color: #9a80d9; }
+.ler-leaders { padding: 38px 7% 70px; text-align: center; background-color: #9a80d9; background-image: linear-gradient(#fff1 1px,transparent 1px),linear-gradient(90deg,#fff1 1px,transparent 1px),linear-gradient(#bb92e0,#9a80d9 40%); background-size: 56px 56px, 56px 56px, 100% 100%; }
+.ler-leaders > .ler-button { margin-top: 30px; }
+.ler-board tbody tr:first-child td { background: #fff1b91f; color: #fff1b9; }
+.ler-board tbody tr:first-child td:first-child::after { content: '★'; margin-left: 3px; font: 13px Montserrat,sans-serif; vertical-align: super; }
 .ler-board { width: 100%; max-width: 720px; margin: 36px auto 0; border-collapse: collapse; text-align: left; font: 600 13px 'IBM Plex Mono', monospace; background: #30245433; border: 3px solid; border-color: #fffbed #645197 #584581 #e6daff; box-shadow: 5px 7px 0 #523c8066; }
 .ler-board th { padding: 12px 14px; font-size: 10px; letter-spacing: .14em; background: #30245466; }
 .ler-board td { padding: 11px 14px; border-top: 1px solid #fffbed33; }
@@ -182,6 +193,8 @@
 .ler-board td:nth-child(3) { color: #fff1b9; }
 .ler-board-note { max-width: 460px; margin: 26px auto 0; font: 11px/1.7 'IBM Plex Mono', monospace; }
 @keyframes ler-bob { 50% { transform: translateY(-8px) rotate(5deg); } }
+@keyframes ler-drop { from { opacity: 0; transform: translateY(-16px) rotate(3deg); } }
+@keyframes ler-live { 50% { opacity: .25; } }
 @media (min-width: 1700px) { .ler-hero-copy { top: 28%; } }
 @media (max-width: 1000px) {
   .ler-nav { padding-inline: 4%; gap: 12px; }
@@ -190,6 +203,8 @@
   .ler-title > span { font-size: 10.5vw; }
   .ler-title small { font-size: 2.2vw; }
   .ler-hero-art { object-position: 50% center; }
+  .ler-top-fixer { top: max(13%, 96px); right: 5%; max-width: 26%; }
+  .ler-top-fixer b { font-size: 28px; }
   .ler-studio-copy { width: 66%; left: 17%; }
   .ler-studio-copy .ler-heading { font-size: 53px; }
   .ler-steps { gap: 28px; }
@@ -226,6 +241,9 @@
   .ler-hud b { font-size: 24px; }
   .ler-hud small { display: none; }
   .ler-hud > span { font-size: 9px; }
+  .ler-top-fixer { top: 13%; right: 6%; max-width: 42%; gap: 3px; }
+  .ler-top-fixer b { font-size: 25px; }
+  .ler-top-fixer small { font-size: 10px; }
   .ler-location { right: 6%; bottom: 12%; }
   .ler-location span { font-size: 9px; }
   .ler-location b { font-size: 10px; }
@@ -288,6 +306,8 @@
   .ler-nav .ler-mark { width: 40px; height: 40px; font-size: 36px; border-width: 2px; }
   .ler-stage { min-height: 0; }
   .ler-hero-copy { top: 19%; }
+  .ler-top-fixer { top: 19%; max-width: 17%; }
+  .ler-top-fixer b { font-size: 24px; }
   .ler-hero-copy .ler-kicker { margin-bottom: 8px; }
   .ler-title > span { font-size: 16svh; }
   .ler-title small { margin-top: 4px; font-size: 4.2svh; }

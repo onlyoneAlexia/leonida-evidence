@@ -4,6 +4,8 @@ import { CASES, W, H, drawLive, ensureFonts, renderCase } from './scenes.js';
 import { analyse } from './forensics.js';
 import { buildRapSheet, rankFor } from './rapsheet.js';
 import { isMuted, play, setMuted, siren, subscribe, unlockAudio } from './sound.js';
+// Scene sound cues are optional, so they're looked up on the module rather than imported by name.
+import * as sound from './sound.js';
 import { boardRows, postRun, useLeaderboard } from './leaderboard.js';
 import Home from './Home.jsx';
 import LeaderboardTable from './LeaderboardTable.jsx';
@@ -24,6 +26,7 @@ const EDITOR_OPTIONS = {
 };
 
 const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
+const calm = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 // Filter and crop changes only reach the exported image once their panel closes,
 // so close any open tool panel (even one hidden by "Hide tool settings") first.
@@ -81,21 +84,76 @@ function SoundToggle() {
   );
 }
 
-// Walking away ends the run early; the rap sheet shows the jobs already finished.
-function QuitButton({ onQuit }) {
+// Home is one tap away on every screen. Mid-run it asks first, and once a job is finished it also offers
+// that job's rap sheet (walking away). `over` means the run has ended anyway: busted or all five jobs done.
+function HomeButton({ onHome, confirm, finished = 0, over, onRapSheet }) {
   const dialog = useRef(null);
   return (
     <>
-      <button type="button" className="btn quit-toggle" onClick={() => dialog.current.showModal()}>Quit</button>
-      <dialog ref={dialog} className="quit-dialog" aria-labelledby="quit-title">
-        <h3 id="quit-title">Walk away from this run?</h3>
-        <p>You keep a rap sheet for the jobs you've finished. Runs you walk away from don't make the leaderboard.</p>
+      <button type="button" className="btn home-toggle" onClick={() => (confirm ? dialog.current.showModal() : onHome())}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 11.5 12 4.5l8.5 7M6.5 9.5V19.5h4v-5h3v5h4V9.5" /></svg>
+        <span>Home</span>
+      </button>
+      {confirm && <dialog ref={dialog} className="home-dialog" aria-labelledby="home-title">
+        <h3 id="home-title">Head home?</h3>
+        <p>{!finished ? "Nothing's finished yet, so there's no rap sheet to keep. Going home ends this run."
+          : over ? 'This run is over. Pick up your rap sheet, or head home without it.'
+            : `You've finished ${finished} job${finished === 1 ? '' : 's'}. Take the rap sheet, or head home and start over. Runs you walk away from don't make the leaderboard.`}</p>
         <form method="dialog" className="actions">
           <button className="btn" autoFocus>Keep playing</button>
-          <button className="btn primary" onClick={onQuit}>Walk away</button>
+          {finished > 0 && <button className="btn" onClick={onRapSheet}>See my rap sheet</button>}
+          <button className="btn primary" onClick={onHome}>Go to the homepage</button>
         </form>
-      </dialog>
+      </dialog>}
     </>
+  );
+}
+
+// VCPD radio chatter under the tape and the lab: this job's calls, led by heat lines that get more urgent with every star.
+const RADIO = {
+  kwik: ['211 reported at Kwik Mart #117, Ocean Drive', 'Clerk says one male suspect walked out calm as you like', 'Pump camera 04 footage requested for the morning file', 'Getaway car last seen heading north on Ocean'],
+  causeway: ['Toll plaza 5A: vehicle stopped on the eastbound shoulder', 'Female passenger out of the car, watching the sunset', 'Box truck in lane two, traffic backing up to the bridge', 'Plate check requested from the toll camera'],
+  bank: ['Silent alarm, Bank of Leonida, Downtown Vice City', 'Lobby cam 11 still recording', 'Teller reports an L+J tattoo on the female suspect', 'Detectives already like Rico for this one'],
+  marina: ['Harbor patrol drone 2 is up over the Keys', 'Duffel bag left on the dock at slip 14', "Rico's yacht inbound, eyes on the boat name", 'Jet ski in the no-wake zone, again'],
+  jewelry: ['459 at the Diamond Mile, alarm still ringing', 'Two suspects on foot, running for a car', 'Tourist on the sidewalk filming everything', 'Bus route 22 blocking the street cam'],
+};
+const HEAT_RADIO = [
+  ['No suspects identified. Forensics queue is normal'],
+  ['BOLO out on a man and a woman from the last scene', 'Units running code 3 through the district'],
+  ['Air unit up, spotlight sweeping the grid', 'Detectives pulling every camera in Leonida'],
+  ['PRIORITY: partial facial match on file', 'Roadblocks going up on the causeway'],
+  ['ALL UNITS: one more tape and it is a warrant', 'SWAT staging two blocks out'],
+];
+
+function Dispatch({ c, stars, alert, hot }) {
+  const level = Math.min(stars, HEAT_RADIO.length - 1);
+  const lines = [
+    ...(alert ? [{ text: alert, hot: true }] : []),
+    ...HEAT_RADIO[level].map(text => ({ text, hot: stars > 0 })),
+    ...(RADIO[c.id] ?? []).map(text => ({ text })),
+  ];
+  const [n, setN] = useState(0);
+  const [still] = useState(calm);
+  // With reduced motion the chatter changes line by line instead of scrolling.
+  useEffect(() => {
+    if (!still) return;
+    const id = setInterval(() => setN(k => k + 1), 5000);
+    return () => clearInterval(id);
+  }, [still]);
+  const urgent = hot || stars >= 3;
+  const line = ({ text, hot: flagged }, i) => <span key={i} className={flagged ? 'hot' : undefined}>{text}</span>;
+  const chars = lines.reduce((sum, l) => sum + l.text.length, 0);
+  return (
+    <div className={`dispatch ${urgent ? 'urgent' : ''}`} role="marquee" aria-label="VCPD dispatch radio">
+      <b className="dispatch-tag"><i aria-hidden="true" />{urgent ? 'VCPD PRIORITY' : 'VCPD RADIO'}</b>
+      <div className="dispatch-window">
+        {still ? <p className="dispatch-line">{line(lines[n % lines.length], 0)}</p>
+          // Restart from the top when a new alert lands, so it scrolls in first.
+          : <p key={lines.length} className="dispatch-track" style={{ '--ticker': `${Math.round(chars * (stars >= 3 ? 0.1 : 0.14))}s` }}>
+            <span>{lines.map(line)}</span><span aria-hidden="true">{lines.map(line)}</span>
+          </p>}
+      </div>
+    </div>
   );
 }
 
@@ -122,33 +180,44 @@ const liveStatus = t => (t.inShot ? 'in shot' : t.kind === 'keep' && t.mustShow 
 
 // The tape plays live and FREEZE picks the frame to doctor. The job clock runs from the moment the tape rolls,
 // so waiting for a better frame costs editing time.
-function Feed({ index, c, stars, cash, onFreeze, onQuit }) {
+function Feed({ index, c, stars, cash, onFreeze, home }) {
   const canvas = useRef(null);
+  const photo = useRef(null);
+  const flash = useRef(null);
   const tRef = useRef(0);
   const frozen = useRef(false);
+  const leave = useRef(0);
   const [done, setDone] = useState(false);
   const [rolling, setRolling] = useState(false);
-  const [flash, setFlash] = useState(false);
+  // The VCR's on-screen display: a noisy spin-up on PLAY, a flash and a held frame on PAUSE.
+  const [osd, setOsd] = useState('');
   const [live, setLive] = useState({ t: 0, all: [] });
 
   useEffect(() => {
     setLive({ t: 0, all: drawLive(canvas.current.getContext('2d'), c, 0).all });
   }, [c]);
+  useEffect(() => () => clearTimeout(leave.current), []);
 
   const freeze = useCallback(() => {
     if (frozen.current) return;
     frozen.current = true;
+    const t = tRef.current;
     setDone(true);
     setRolling(false);
-    setFlash(true);
+    setOsd('pause');
     play('shutter');
-    setTimeout(() => onFreeze(tRef.current), 220);
+    // Hold the paused frame for a beat before cutting to the lab; the job clock already stopped at `t`.
+    leave.current = setTimeout(() => onFreeze(t), calm() ? 250 : 650);
   }, [onFreeze]);
 
   useEffect(() => {
     if (!rolling) return;
     const g = canvas.current.getContext('2d');
+    const box = photo.current;
+    const glare = flash.current;
     const start = performance.now();
+    const still = calm();
+    const fired = new Set();
     let raf;
     let frames = 0;
     const loop = now => {
@@ -156,6 +225,11 @@ function Feed({ index, c, stars, cash, onFreeze, onQuit }) {
       const t = Math.max(0, Math.min(c.clip, (now - start) / 1000));
       tRef.current = t;
       const f = drawLive(g, c, t);
+      // Scenes may add camera shake and flashes (fx) and sound cues; tapes without them just play.
+      const shake = still ? 0 : Math.min(1, f.fx?.shake ?? 0);
+      box.style.transform = shake > 0.01 ? `translate(${(Math.sin(t * 53) * shake * 7).toFixed(1)}px, ${(Math.cos(t * 41) * shake * 5).toFixed(1)}px) rotate(${(Math.sin(t * 31) * shake * 0.7).toFixed(2)}deg)` : '';
+      glare.style.opacity = still ? 0 : Math.min(1, f.fx?.flash ?? 0);
+      c.cues?.forEach((q, i) => { if (!fired.has(i) && t >= q.at) { fired.add(i); sound.cue?.(q.name); } });
       // Boxes follow the crew at 30 fps; the picture itself runs at the display rate.
       if (frames++ % 2 === 0 || t >= c.clip) setLive({ t, all: f.all });
       if (t >= c.clip) freeze();
@@ -164,29 +238,39 @@ function Feed({ index, c, stars, cash, onFreeze, onQuit }) {
     raf = requestAnimationFrame(loop);
     const onKey = event => { if (event.code === 'Space' && !event.target.closest('input, textarea, dialog')) { event.preventDefault(); freeze(); } };
     document.addEventListener('keydown', onKey);
-    return () => { cancelAnimationFrame(raf); document.removeEventListener('keydown', onKey); };
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', onKey);
+      box.style.transform = '';
+      glare.style.opacity = 0;
+    };
   }, [rolling, c, freeze]);
 
-  const roll = () => { unlockAudio(); play('tick'); setRolling(true); };
+  const roll = () => { unlockAudio(); play('tick'); setRolling(true); setOsd('play'); };
   const shown = live.all.filter(t => t.inShot && t.rect);
   return (
     <div className={`screen briefing ${stars >= 1 ? 'heat-sirens' : ''}`}>
       <div className="brief-card">
         <div className="brief-head">
+          {home}
           <span className="case-no">CASE {index + 1} / {CASES.length}</span>
           <Stars count={stars} />
           <span className="cash">{money(cash)}</span>
           <SoundToggle />
-          <QuitButton onQuit={onQuit} />
         </div>
         <h2>{c.title}</h2>
         <p className="place">{c.place}</p>
         <div className="brief-body">
-          <div className={`evidence-photo feed ${rolling ? 'rolling' : ''} ${flash ? 'flash' : ''}`}>
-            <canvas ref={canvas} width={W} height={H} data-t={live.t.toFixed(2)} aria-label={`Live CCTV tape: ${c.title}`} role="img" />
-            <TargetBoxes targets={shown} />
-            {!rolling && !done && <button type="button" className="roll-tape" onClick={roll}><span aria-hidden="true">▶</span> Roll tape</button>}
-            {rolling && <div className="tape-bar" aria-hidden="true"><i style={{ width: `${(live.t / c.clip) * 100}%` }} /></div>}
+          <div className="feed-col">
+            <div ref={photo} className={`evidence-photo feed ${rolling ? 'rolling' : ''} ${osd ? `vhs-${osd}` : ''}`}>
+              <canvas ref={canvas} width={W} height={H} data-t={live.t.toFixed(2)} aria-label={`Live CCTV tape: ${c.title}`} role="img" />
+              <TargetBoxes targets={shown} />
+              <i ref={flash} className="fx-flash" aria-hidden="true" />
+              {osd && <div key={osd} className="vhs" aria-hidden="true"><i className="vhs-noise" /><i className="vhs-band" /><span className="vhs-osd">{osd === 'play' ? 'PLAY ▶' : 'PAUSE ▮▮'}</span></div>}
+              {!rolling && !done && <button type="button" className="roll-tape" onClick={roll}><span aria-hidden="true">▶</span> Roll tape</button>}
+              {rolling && <div className="tape-bar" aria-hidden="true"><i style={{ width: `${(live.t / c.clip) * 100}%` }} /></div>}
+            </div>
+            <Dispatch c={c} stars={stars} />
           </div>
           <div className="brief-side">
             <p className="brief-text">{c.brief}</p>
@@ -201,7 +285,7 @@ function Feed({ index, c, stars, cash, onFreeze, onQuit }) {
             <HeatChips stars={stars} />
             <p className="clock">⏱ {clock(c.seconds - Math.floor(live.t))} on the clock · payout up to {money(c.payout)}</p>
             {rolling ? <button className="btn primary freeze" onClick={freeze}>Freeze frame <kbd>Space</kbd></button>
-              : <button className="btn primary" onClick={roll} disabled={done}>Roll tape</button>}
+              : <button className="btn primary" onClick={roll} disabled={done}>{done ? 'Frame frozen' : 'Roll tape'}</button>}
           </div>
         </div>
       </div>
@@ -265,11 +349,13 @@ const SURPRISE_AFTER = 6000;
 const SURPRISE_BONUS = 5;
 const SHAKE_EVERY = 13000;
 
-function Lab({ index, c, still, budget, stars, cash, onSubmit, onQuit }) {
+function Lab({ index, c, still, budget, stars, cash, onSubmit, home }) {
   const editorRef = useRef(null);
   const [left, setLeft] = useState(budget);
   const [revealed, setRevealed] = useState(false);
   const [shaking, setShaking] = useState(false);
+  // The frozen frame tears apart as the lab cuts in.
+  const [cut, setCut] = useState(() => !calm());
   const options = useMemo(() => ({
     ...EDITOR_OPTIONS,
     features: { ...EDITOR_OPTIONS.features, imageEditor: { tools: { ...EDITOR_OPTIONS.features.imageEditor.tools, ...(stars >= 3 && { stickers: false }), ...(stars >= 4 && { shapes: false }) } } },
@@ -431,7 +517,7 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, onQuit }) {
     <div ref={labRef} className={`screen lab ${hurry ? 'hurry' : ''} ${expanded ? 'workspace-expanded' : ''} ${stars >= 1 ? 'heat-sirens' : ''} ${shaking ? 'shake' : ''}`}>
       <div className="hud">
         <div className="hud-left">
-          <QuitButton onQuit={onQuit} />
+          {home}
           <span className="case-no">CASE {index + 1}</span>
           <strong>{c.title}</strong>
           <Stars count={stars} />
@@ -444,6 +530,7 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, onQuit }) {
           Send to evidence →
         </button>
       </div>
+      <Dispatch c={c} stars={stars} hot={ready && hurry} alert={revealed ? `DETECTIVES: enhance that. ${still.surprise.label} in the shot` : ''} />
       {revealed && <div className="enhance" role="alert"><b>ENHANCE</b> Detectives spotted something new: {still.surprise.label}. Hide it too. <em>+{SURPRISE_BONUS}s</em></div>}
       <div className="workspace-controls" role="group" aria-label="Editing workspace">
         <button className="btn" aria-controls="lab-orders" aria-expanded={ordersOpen && !expanded} disabled={expanded} onClick={() => setOrdersOpen(open => !open)}>{ordersOpen && !expanded ? 'Hide orders' : 'Show orders'}</button>
@@ -497,6 +584,7 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, onQuit }) {
           />}
         </div>
       </div>
+      {cut && <div className="lab-cut" aria-hidden="true" style={{ backgroundImage: `url(${still.dataUrl})` }} onAnimationEnd={event => { if (event.target === event.currentTarget) setCut(false); }} />}
     </div>
   );
 }
@@ -505,7 +593,7 @@ function Lab({ index, c, still, budget, stars, cash, onSubmit, onQuit }) {
 const SCAN_LEAD = 400;
 const SCAN_STEP = 420;
 
-function Verdict({ index, entry, stars, cash, onNext, onQuit }) {
+function Verdict({ index, entry, stars, cash, onNext, home }) {
   const { analysis } = entry;
   const { results } = analysis;
   const [checked, setChecked] = useState(0);
@@ -537,11 +625,11 @@ function Verdict({ index, entry, stars, cash, onNext, onQuit }) {
     <div className="screen verdict">
       <div className="verdict-card">
         <div className="brief-head">
+          {home}
           <span className="case-no">VCPD FORENSICS · CASE {index + 1}</span>
           <Stars count={stars} prev={Math.max(0, stars - entry.heat)} delay={scanMs / 1000 + 0.3} />
           <span className="cash"><CountUp from={cash - entry.total} to={cash} delay={scanMs + 100} /></span>
           <SoundToggle />
-          <QuitButton onQuit={onQuit} />
         </div>
         <div className="verdict-body">
           <div className={`evidence-photo doctored ${scanning ? 'scanning' : busted ? 'busted' : ''}`}>
@@ -602,7 +690,7 @@ function Verdict({ index, entry, stars, cash, onNext, onQuit }) {
   );
 }
 
-function RapSheet({ alias, history, stars, cash, walked, onReplay }) {
+function RapSheet({ alias, history, stars, cash, walked, onReplay, home }) {
   const [poster, setPoster] = useState(null);
   const [posterError, setPosterError] = useState(false);
   const [printAttempt, setPrintAttempt] = useState(0);
@@ -630,6 +718,7 @@ function RapSheet({ alias, history, stars, cash, walked, onReplay }) {
   return (
     <div className="screen rapsheet">
       <div className="rap-inner">
+        <div className="screen-bar">{home}</div>
         <p className="kicker">{busted ? 'The VCPD caught up with you' : walked ? 'You walked away' : 'All tapes processed'}</p>
         <h2 className="logo small"><span>{rank.title}</span></h2>
         <p className="lede">{rank.line}</p>
@@ -709,6 +798,8 @@ export default function App() {
   const [walked, setWalked] = useState(false);
   const [still, setStill] = useState(null);
   const submission = useRef(null);
+  // Bumped whenever a run is left, so forensics still running for it can't pull the player back in.
+  const run = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -729,10 +820,12 @@ export default function App() {
   const onSubmit = useCallback(
     async (edited, left, reason, targets) => {
       submission.current = { edited, left, reason, targets };
+      const token = run.current;
       setPhase('analysing');
       let analysis;
       try { analysis = await analyse(still.canvas, edited, targets); }
-      catch { setPhase('analysis-error'); return; }
+      catch { if (token === run.current) setPhase('analysis-error'); return; }
+      if (token !== run.current) return;
       // A KEEP that had to be in the shot but wasn't counts against you.
       const missing = still.missing.map((t) => ({ ...t, missing: true, pass: false, changed: 0, cells: [] }));
       analysis = { ...analysis, results: [...analysis.results, ...missing] };
@@ -765,26 +858,35 @@ export default function App() {
     reset();
     setPhase('briefing');
   };
-  // With nothing finished there is no rap sheet to show, so quitting goes back to the title.
-  const quit = () => {
-    if (history.length) {
-      setWalked(true);
-      setPhase('end');
-    } else {
-      reset();
-      setPhase('title');
-    }
+  // Home resets the run and opens the landing page at the top: the #play anchor from the start button would
+  // otherwise scroll it straight back down to the start form.
+  const goHome = () => {
+    run.current++;
+    reset();
+    if (window.location.hash) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    window.scrollTo(0, 0);
+    setPhase('title');
+  };
+  // Walking away keeps a rap sheet of the finished jobs. A run that ended anyway (busted, or all five done) keeps its real ending.
+  const over = stars >= MAX_STARS || history.length >= CASES.length;
+  const walkAway = () => {
+    run.current++;
+    setWalked(!over);
+    setPhase('end');
   };
 
   const name = alias.trim() || 'The Cleaner';
+  const home = <HomeButton onHome={goHome} />;
+  const runHome = <HomeButton confirm finished={history.length} over={over} onHome={goHome} onRapSheet={walkAway} />;
 
-  if (gameError) return <div className="screen center"><div role="alert"><p>{gameError}</p><button className="btn primary" onClick={() => window.location.reload()}>Reload game</button></div></div>;
-  if (phase === 'analysis-error') return <div className="screen center"><div role="alert"><p>Forensics could not read the submitted image. Your score has not changed.</p><button className="btn primary" onClick={() => { const last = submission.current; onSubmit(last.edited, last.left, last.reason, last.targets); }}>Retry forensics</button><button className="btn" onClick={() => { setAttempt(n => n + 1); setPhase('briefing'); }}>Redo this tape</button></div></div>;
+  // A tape that failed to load stays failed until the page reloads, so Home reloads the landing page.
+  if (gameError) return <div className="screen center"><div className="screen-bar"><HomeButton onHome={() => window.location.assign('/')} /></div><div role="alert"><p>{gameError}</p><button className="btn primary" onClick={() => window.location.reload()}>Reload game</button></div></div>;
+  if (phase === 'analysis-error') return <div className="screen center"><div className="screen-bar">{home}</div><div role="alert"><p>Forensics could not read the submitted image. Your score has not changed.</p><div className="actions"><button className="btn primary" onClick={() => { const last = submission.current; onSubmit(last.edited, last.left, last.reason, last.targets); }}>Retry forensics</button><button className="btn" onClick={() => { setAttempt(n => n + 1); setPhase('briefing'); }}>Redo this tape</button></div></div></div>;
 
   if (phase === 'title') return <Home ready={!!scenes} scenes={scenes} alias={alias} setAlias={setAlias} onStart={() => { unlockAudio(); window.scrollTo(0, 0); setPhase('briefing'); }} />;
-  if (phase === 'briefing') return <Feed key={`${attempt}-${index}`} index={index} c={c} stars={stars} cash={cash} onFreeze={onFreeze} onQuit={quit} />;
-  if (phase === 'lab') return <Lab key={`${attempt}-${index}`} index={index} c={c} still={still} budget={c.seconds - still.used} stars={stars} cash={cash} onSubmit={onSubmit} onQuit={quit} />;
-  if (phase === 'analysing') return <div className="screen center"><p className="stamp-text">Uploading to VCPD evidence…</p></div>;
-  if (phase === 'verdict') return <Verdict key={index} index={index} entry={history[history.length - 1]} stars={stars} cash={cash} onNext={next} onQuit={quit} />;
-  return <RapSheet alias={name} history={history} stars={stars} cash={cash} walked={walked} onReplay={restart} />;
+  if (phase === 'briefing') return <Feed key={`${attempt}-${index}`} index={index} c={c} stars={stars} cash={cash} onFreeze={onFreeze} home={runHome} />;
+  if (phase === 'lab') return <Lab key={`${attempt}-${index}`} index={index} c={c} still={still} budget={c.seconds - still.used} stars={stars} cash={cash} onSubmit={onSubmit} home={runHome} />;
+  if (phase === 'analysing') return <div className="screen center"><div className="screen-bar">{runHome}</div><p className="stamp-text">Uploading to VCPD evidence…</p></div>;
+  if (phase === 'verdict') return <Verdict key={index} index={index} entry={history[history.length - 1]} stars={stars} cash={cash} onNext={next} home={runHome} />;
+  return <RapSheet alias={name} history={history} stars={stars} cash={cash} walked={walked} onReplay={restart} home={home} />;
 }

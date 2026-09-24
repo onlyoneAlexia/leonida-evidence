@@ -8,8 +8,6 @@ import { ART } from './art-manifest.js';
 export const W = 1280;
 export const H = 720;
 const BACKGROUNDS = ['bg-kwik', 'bg-causeway', 'bg-bank', 'bg-marina', 'bg-jewelry'];
-// Face bounds in the bystander sprites, as fractions of the sprite (x, y, w, h).
-const EXTRA_FACES = { 'bystander-tourist': [0.42, 0.05, 0.24, 0.09], 'guard-bank': [0.41, 0.06, 0.2, 0.085] };
 
 const IMG = {};
 let artLoading;
@@ -38,25 +36,116 @@ const clamp01 = n => Math.max(0, Math.min(1, n));
 const lerp = (a, b, p) => a + (b - a) * p;
 const smooth = p => p * p * (3 - 2 * p);
 const seg = (t, t0, t1) => clamp01((t - t0) / (t1 - t0));
+// Speeds up over the first `r` of a trip, cruises, and slows over the last `r`.
+const ramp = r => u => {
+  const v = 1 / (1 - r);
+  return u < r ? (v * u * u) / (2 * r) : u > 1 - r ? 1 - (v * (1 - u) ** 2) / (2 * r) : v * (u - r / 2);
+};
+const stroll = ramp(0.3);
+const dash = ramp(0.18);
+const steady = u => u;
+// 1 when `x` is mid-frame, falling to 0 `span` px either side: how hard a passing vehicle shakes the camera.
+const near = (x, span) => clamp01(1 - Math.abs(x - W / 2) / span);
 
 function rr(g, x, y, w, h, r) {
   g.beginPath();
   g.roundRect(x, y, w, h, r);
 }
 
-// A walk from a to b between t0 and t1; `step` drives the stride bob.
-function walk(t, t0, t1, a, b) {
-  const p = smooth(seg(t, t0, t1));
-  return { x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), s: lerp(a.s, b.s, p), step: t > t0 && t < t1 ? (t - t0) * 3.4 : 0 };
+function union(rects) {
+  const list = rects.filter(Boolean);
+  if (!list.length) return null;
+  const x0 = Math.min(...list.map(r => r.x)), y0 = Math.min(...list.map(r => r.y));
+  return { x: x0, y: y0, w: Math.max(...list.map(r => r.x + r.w)) - x0, h: Math.max(...list.map(r => r.y + r.h)) - y0 };
 }
 
-// Crew member from the shared atlas, feet at (x, y). Returns face/tattoo bounds and the body that blocks the view.
-function crew(g, who, pos, { tattoo = false } = {}) {
-  const bob = pos.step ? Math.abs(Math.sin(pos.step * Math.PI)) * 5 * pos.s : 0;
-  const drawn = drawAvatar(g, { avatar: who, x: pos.x, y: pos.y - bob, s: pos.s, tattoo });
-  const h = 340 * pos.s;
-  const w = h / 2;
-  return { ...drawn, depth: pos.y, body: { x: pos.x - w * 0.28, y: pos.y - h * 0.96, w: w * 0.56, h: h * 0.96 } };
+// --- People. Standing crew use the front-facing atlas; walks, runs, the stretch and the tourist's photos come
+// from animation strips whose per-frame face and body boxes follow the head through the cycle. ---
+
+const FIG = 330; // head-to-toe height of a figure at scale 1, as the crew atlas draws it
+const FOOT = 6; // atlas poses stand this far above their feet point at scale 1
+const DEPTH = 2; // a step toward the camera moves the feet down the screen this many times less than a step across
+
+// Ground walked from a to b by progress p, in scale-1 px: nearer the camera, each screen pixel is less ground.
+function ground(a, b, p) {
+  const len = Math.hypot(b.x - a.x, (b.y - a.y) * DEPTH);
+  const ds = b.s - a.s;
+  return Math.abs(ds) < 1e-4 ? (len * p) / a.s : (len / ds) * Math.log((a.s + ds * p) / a.s);
+}
+
+// Where in its cycle (0..1) each frame of a strip starts: walks carry measured timings, other strips are even.
+const starts = art => art.timing ?? Array.from({ length: art.frames }, (_, i) => i / art.frames);
+const cycle = (art, phase) => {
+  const at = starts(art), u = ((phase % 1) + 1) % 1;
+  let frame = 0;
+  while (frame + 1 < art.frames && at[frame + 1] <= u) frame++;
+  return frame;
+};
+
+// On foot from a to b between t0 and t1 on an animation strip. Frames advance with the ground covered, so feet don't
+// skate, and the stride stretches a little so every trip starts and ends on a feet-together frame.
+function trip(t, t0, t1, a, b, sheet, ease = stroll) {
+  const art = ART[sheet], at = starts(art);
+  const p = ease(seg(t, t0, t1));
+  const total = ground(a, b, 1);
+  const raw = total / ((art.stride * FIG) / art.tall);
+  // Whole cycles end on the rest frame; the other feet-together frame sits half a cycle round.
+  const half = (at[(art.rest + art.frames / 2) % art.frames] - at[art.rest] + 1) % 1;
+  const cycles = [0, half].map(o => o + Math.max(o ? 0 : 1, Math.round(raw - o))).sort((x, y) => Math.abs(x - raw) - Math.abs(y - raw))[0];
+  return {
+    x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), s: lerp(a.s, b.s, p), sheet, flip: b.x < a.x,
+    frame: cycle(art, at[art.rest] + 1e-6 + (cycles * ground(a, b, p)) / total),
+  };
+}
+
+// Standing about: breathing, plus for the nervous a restless shift from foot to foot.
+const idle = (st, t, nerves = 0) => ({
+  ...st, x: st.x + nerves * (Math.sin(t * 1.9) * 4 + Math.sin(t * 5.3) * 1.6), breath: 1 + 0.009 * Math.sin(t * 2.3),
+});
+
+// One frame of an animation strip, head centred over the feet at (x, y). Returns that frame's face and body boxes.
+function strip(g, name, frame, { x, y, s, drop = 0, flip = false, alpha = 1, squash = 1, breath = 1 }) {
+  const a = ART[name];
+  const size = (FIG * s) / a.tall;
+  const h = size * breath, w = ((size * a.w) / a.h) * squash;
+  const top = y + drop - FOOT * s - a.feet * h;
+  if (alpha > 0.01) {
+    g.save();
+    g.globalAlpha = alpha;
+    if (flip) { g.translate(2 * x, 0); g.scale(-1, 1); }
+    g.drawImage(IMG[name], frame * a.w, 0, a.w, a.h, x - w / 2, top, w, h);
+    g.restore();
+  }
+  const box = ([bx, by, bw, bh]) => ({ x: flip ? x + w / 2 - (bx + bw) * w : x - w / 2 + bx * w, y: top + by * h, w: bw * w, h: bh * h });
+  return { face: box(a.face[frame]), body: box(a.body[frame]) };
+}
+
+// A crew member's front pose from the shared atlas, with the body that blocks the view.
+function pose(g, who, { x, y, s, drop = 0, alpha = 1, squash = 1, breath = 1, tattoo = false }) {
+  const drawn = drawAvatar(g, { avatar: who, x, y: y + drop, s, alpha, squash, breath, tattoo });
+  const h = 340 * s * breath, w = ((340 * s) / 2) * squash;
+  return { ...drawn, body: { x: x - w * 0.28, y: y + drop - h * 0.96, w: w * 0.56, h: h * 0.96 } };
+}
+
+// Someone in a strip pose (`sheet`, `frame`) or facing the camera: the atlas pose of `who`, or a front strip
+// (`front`, `frontFrame`). `turn` (0..1) swings the strip pose round to the front one with a quick squash and blend,
+// so poses never snap. Faces fading in or out count once they are mostly drawn.
+function person(g, who, st) {
+  const turn = st.sheet ? clamp01(st.turn ?? 0) : 1;
+  const alpha = st.alpha ?? 1;
+  const parts = [];
+  if (turn < 0.56) parts.push(strip(g, st.sheet, st.frame, { ...st, alpha: alpha * clamp01((0.56 - turn) / 0.12), squash: 1 - 0.28 * clamp01(turn / 0.5) }));
+  if (turn > 0.44) {
+    const o = { ...st, flip: false, alpha: alpha * clamp01((turn - 0.44) / 0.12), squash: 0.72 + 0.28 * clamp01((turn - 0.5) / 0.5) };
+    parts.push(st.front ? strip(g, st.front, st.frontFrame ?? 0, o) : pose(g, who, o));
+  }
+  const seen = alpha >= 0.5;
+  return {
+    face: seen ? union(parts.map(p => p.face)) : null,
+    tattoo: seen ? parts.find(p => p.tattoo)?.tattoo ?? null : null,
+    body: seen ? union(parts.map(p => p.body)) : null,
+    depth: st.y,
+  };
 }
 
 // A sprite from the manifest, bottom-centre at (cx, bottom), `w` wide.
@@ -72,14 +161,173 @@ function sprite(g, name, cx, bottom, w, { alpha = 1 } = {}) {
   return { rect, place, depth: bottom };
 }
 
-// Bystander sprite drawn at crew scale (feet at y).
-function extra(g, name, pos) {
-  const h = 340 * pos.s * 0.96;
-  const bob = pos.step ? Math.abs(Math.sin(pos.step * Math.PI)) * 5 * pos.s : 0;
-  const s = sprite(g, name, pos.x, pos.y - bob, (h * ART[name].w) / ART[name].h);
-  const [fx, fy, fw, fh] = EXTRA_FACES[name];
-  const r = s.rect;
-  return { depth: pos.y, face: { x: r.x + fx * r.w, y: r.y + fy * r.h, w: fw * r.w, h: fh * r.h }, body: { x: r.x + r.w * 0.18, y: r.y, w: r.w * 0.64, h: r.h } };
+// --- Light and motion effects. Lights add ('lighter') so they read as glare on the tape. ---
+
+function glow(g, x, y, r, color, alpha) {
+  if (alpha <= 0.005 || r <= 0) return;
+  const grad = g.createRadialGradient(x, y, 0, x, y, r);
+  grad.addColorStop(0, `rgba(${color},${alpha})`);
+  grad.addColorStop(1, `rgba(${color},0)`);
+  g.fillStyle = grad;
+  g.fillRect(x - r, y - r, r * 2, r * 2);
+}
+
+// A vehicle tearing past: fading copies trail behind it like smear on a cheap camera.
+function streaks(g, img, x, y, w, h, dir, n = 3, gap = 0.06) {
+  g.save();
+  for (let k = n; k >= 1; k--) {
+    g.globalAlpha = 0.34 / (k + 0.6);
+    g.drawImage(img, x - dir * k * w * gap, y, w, h);
+  }
+  g.restore();
+}
+
+// Spray, dust or road mist kicked up behind a moving vehicle: specks that fly back, rise and fade.
+function kickup(g, t, x, y, dir, { n = 16, reach = 120, rise = 30, size = 5, color = '255,255,255', alpha = 0.55, seed = 1 } = {}) {
+  const rand = rng(seed);
+  g.save();
+  g.fillStyle = `rgb(${color})`;
+  for (let i = 0; i < n; i++) {
+    const a = rand(), b = rand();
+    const age = (t * (1.8 + a) + i / n) % 1;
+    g.globalAlpha = alpha * (1 - age);
+    g.beginPath();
+    g.arc(x - dir * age * reach * (0.5 + b * 0.7), y - Math.sin(age * Math.PI) * rise * (0.4 + a), size * (0.5 + age * 1.6), 0, Math.PI * 2);
+    g.fill();
+  }
+  g.restore();
+}
+
+// A VCPD cruiser in side view: body bounce, motion streaks, headlights at night and a flashing red and blue bar.
+// `dir` 1 drives right, -1 left. Returns the cabin and body, which block the view (not the air above the hood).
+function cruiser(g, t, cx, bottom, w, dir, { night = true, seed = 1 } = {}) {
+  const img = IMG['police-cruiser'], a = ART['police-cruiser'];
+  const h = (w * a.h) / a.w;
+  const x = cx - w / 2, y = bottom - h - Math.abs(Math.sin(t * 23 + seed)) * 2.4 - Math.sin(t * 9) * 1.2;
+  const at = (fx, fy) => ({ x: dir > 0 ? x + fx * w : 2 * cx - x - fx * w, y: y + fy * h });
+  const part = (fx, fy, fw, fh) => ({ x: dir > 0 ? x + fx * w : 2 * cx - x - (fx + fw) * w, y: y + fy * h, w: fw * w, h: fh * h });
+  g.save();
+  if (dir < 0) { g.translate(2 * cx, 0); g.scale(-1, 1); }
+  streaks(g, img, x, y, w, h, 1);
+  g.drawImage(img, x, y, w, h);
+  g.restore();
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  if (night) {
+    const lamp = at(0.955, 0.6);
+    glow(g, lamp.x, lamp.y, w * 0.14, '255,244,210', 0.8);
+    glow(g, lamp.x + dir * w * 0.3, lamp.y + h * 0.3, w * 0.36, '255,240,200', 0.18);
+  }
+  // Two quick red flashes, then two blue: the bar washes everything near it.
+  const beat = (t * 2.4 + seed * 0.37) % 1;
+  const red = beat < 0.1 || (beat > 0.18 && beat < 0.28), blue = (beat > 0.5 && beat < 0.6) || (beat > 0.68 && beat < 0.78);
+  for (const [on, fx, color] of [[red, 0.494, '255,40,70'], [blue, 0.453, '50,120,255']]) {
+    const p = at(fx, 0.035);
+    glow(g, p.x, p.y, w * (on ? 0.62 : 0.1), color, on ? (night ? 0.5 : 0.32) : 0.3);
+    glow(g, p.x, p.y, w * 0.05, on ? '255,255,255' : color, on ? 0.95 : 0.5);
+  }
+  g.restore();
+  return { bodies: [part(0.24, 0.07, 0.45, 0.25), { ...part(0.01, 0.31, 0.98, 0.69), h: bottom - y - 0.31 * h }], depth: bottom };
+}
+
+// The VCPD helicopter, bobbing, with rotor flicker and blinking nav lights. `face` runs from -1 (nose left)
+// to 1 (nose right) through a quick turn. Returns where its searchlight hangs.
+function helicopter(g, t, cx, cy, w, face) {
+  const img = IMG['helicopter-police'], a = ART['helicopter-police'];
+  const h = (w * a.h) / a.w;
+  const x = cx - w / 2, y = cy - h / 2 + Math.sin(t * 2.1) * 3;
+  const sx = Math.sign(face || 1) * Math.max(0.15, Math.abs(face));
+  const at = (fx, fy) => ({ x: cx + (fx - 0.5) * w * sx, y: y + fy * h });
+  g.save();
+  g.translate(cx, 0);
+  g.scale(sx, 1);
+  g.translate(-cx, 0);
+  g.drawImage(img, x, y, w, h);
+  // Blades sweeping over the painted blur.
+  g.strokeStyle = 'rgba(20,22,44,0.4)';
+  g.lineWidth = 2.5;
+  g.beginPath();
+  for (let k = 0; k < 2; k++) {
+    const ang = t * 41 + k * 1.6;
+    g.moveTo(x + 0.607 * w - Math.cos(ang) * w * 0.5, y + 0.144 * h - Math.sin(ang) * h * 0.05);
+    g.lineTo(x + 0.607 * w + Math.cos(ang) * w * 0.5, y + 0.144 * h + Math.sin(ang) * h * 0.05);
+  }
+  g.stroke();
+  g.restore();
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  const tail = at(0.08, 0.45), belly = at(0.55, 0.78);
+  if (Math.sin(t * 7) > 0.2) glow(g, tail.x, tail.y, 16, '255,40,40', 0.9);
+  if ((t * 1.3) % 1 < 0.08) glow(g, belly.x, belly.y, 26, '255,255,255', 0.9);
+  g.restore();
+  return at(0.838, 0.894);
+}
+
+// A searchlight: a cone of light from `src` down to a pool on the ground; `k` is its strength.
+function searchlight(g, src, pool, k) {
+  if (k <= 0.01) return;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  const cone = g.createLinearGradient(src.x, src.y, pool.x, pool.y);
+  cone.addColorStop(0, `rgba(255,250,225,${0.42 * k})`);
+  cone.addColorStop(1, `rgba(255,250,225,${0.07 * k})`);
+  g.fillStyle = cone;
+  g.beginPath();
+  g.moveTo(src.x - 4, src.y);
+  g.lineTo(src.x + 4, src.y);
+  g.lineTo(pool.x + pool.r, pool.y);
+  g.lineTo(pool.x - pool.r, pool.y);
+  g.closePath();
+  g.fill();
+  g.translate(pool.x, pool.y);
+  g.scale(1, 0.36);
+  glow(g, 0, 0, pool.r * 1.15, '255,248,220', 0.42 * k);
+  g.restore();
+  glow(g, src.x, src.y, 22, '255,255,240', 0.9 * k);
+}
+
+// Alarm strobes: red beacons flashing in turn, each washing the room around it in red. `k` fades them in.
+function alarm(g, t, lamps, k = 1) {
+  if (k <= 0) return;
+  let wash = 0;
+  for (const [i, [x, y, r]] of lamps.entries()) {
+    const p = Math.max(0, Math.sin((t * 1.6 + i * 0.5) * Math.PI * 2)) ** 2 * k;
+    wash = Math.max(wash, p);
+    g.fillStyle = p > 0.3 ? '#ff4a5a' : '#6a1420';
+    g.beginPath();
+    g.arc(x, y, 8, Math.PI, 0);
+    g.fill();
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    glow(g, x, y, r, '255,30,50', 0.6 * p);
+    glow(g, x, y - 3, 22, '255,210,210', p);
+    g.restore();
+  }
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  g.fillStyle = `rgba(255,20,40,${0.12 * wash})`;
+  g.fillRect(0, 0, W, H);
+  g.restore();
+}
+
+// A camera flash: a white burst with a star glint. While bright it whites out the evidence right next to it.
+function cameraFlash(g, x, y, k) {
+  if (k <= 0.01) return null;
+  g.save();
+  g.globalCompositeOperation = 'lighter';
+  glow(g, x, y, 40 + 130 * k, '255,255,255', k);
+  glow(g, x, y, 26 + 30 * k, '255,255,255', k);
+  g.strokeStyle = `rgba(255,255,255,${0.8 * k})`;
+  g.lineWidth = 2;
+  g.beginPath();
+  for (const [dx, dy] of [[1, 0], [0, 1], [0.7, 0.7], [0.7, -0.7]]) {
+    g.moveTo(x - dx * 90 * k, y - dy * 90 * k);
+    g.lineTo(x + dx * 90 * k, y + dy * 90 * k);
+  }
+  g.stroke();
+  g.restore();
+  const r = 62 * k;
+  return k > 0.4 ? { x: x - r, y: y - r, w: r * 2, h: r * 2 } : null;
 }
 
 const pad = (r, n) => r && { x: r.x - n, y: r.y - n, w: r.w + n * 2, h: r.h + n * 2 };
@@ -131,13 +379,13 @@ function letterIn(g, r, text, color, family = 'Montserrat, sans-serif') {
   return pad(r, 4);
 }
 
-function neon(g, text, x, y, size, color, glow = 1) {
+function neon(g, text, x, y, size, color, bright = 1) {
   g.save();
   g.font = `${size}px Anton, sans-serif`;
   g.textBaseline = 'middle';
-  g.globalAlpha = 0.35 + 0.65 * glow;
+  g.globalAlpha = 0.35 + 0.65 * bright;
   g.shadowColor = color;
-  g.shadowBlur = 26 * glow;
+  g.shadowBlur = 26 * bright;
   g.fillStyle = color;
   g.fillText(text, x, y);
   g.shadowBlur = 8;
@@ -199,15 +447,7 @@ function hazards(g, car, t) {
   if (Math.sin(t * Math.PI * 2.2) < 0) return;
   g.save();
   g.globalCompositeOperation = 'lighter';
-  for (const fx of [0.2, 0.8]) {
-    const x = car.x + car.w * fx;
-    const y = car.y + car.h * 0.5;
-    const glow = g.createRadialGradient(x, y, 2, x, y, car.w * 0.12);
-    glow.addColorStop(0, 'rgba(255,190,60,0.9)');
-    glow.addColorStop(1, 'rgba(255,140,0,0)');
-    g.fillStyle = glow;
-    g.fillRect(x - car.w * 0.12, y - car.w * 0.12, car.w * 0.24, car.w * 0.24);
-  }
+  for (const fx of [0.2, 0.8]) glow(g, car.x + car.w * fx, car.y + car.h * 0.5, car.w * 0.12, '255,170,40', 0.9);
   g.restore();
 }
 
@@ -277,7 +517,8 @@ function idCard(g, r) {
   return pad(r, 6);
 }
 
-// --- Scenes. Each draws the frame at `t` seconds and returns evidence rects and blockers. ---
+// --- Scenes. Each draws the frame at `t` seconds and returns evidence rects, blockers and the frame's fx
+// (camera shake from heavy traffic, white-out from a flash). ---
 
 function draw(g, list) {
   // Nearest last: everything drawn later (larger depth) can block what was drawn before it.
@@ -285,33 +526,73 @@ function draw(g, list) {
   for (const item of list.filter(Boolean).sort((a, b) => a.depth - b.depth)) out.push({ depth: item.depth, ...item.draw() });
   return out;
 }
-const blockers = drawn => drawn.filter(d => d.body).map(d => ({ depth: d.depth, rect: d.body }));
+// Anything drawn with a `body` (or several `bodies`) blocks what stands behind it.
+const blockers = drawn => drawn.flatMap(d => (d.bodies ?? [d.body]).filter(Boolean).map(rect => ({ depth: d.depth, rect })));
 // A drawn person, filed under `key`, whose body blocks whatever stands behind them.
 const as = (key, p) => ({ [key]: p, body: p.body });
+const target = p => p?.face && { rect: p.face, depth: p.depth };
+
+const KWIK = {
+  door: { x: 1110, y: 392, s: 0.6 }, lookout: { x: 1030, y: 430, s: 0.68 },
+  pillar: { x: 886, y: 497, s: 0.82 }, car: { x: 656, y: 604, s: 1.05 },
+};
+
+// Jason steps out of the store and freezes, facing the lot, as a cruiser screams past; when the chopper arrives
+// he hurries behind the canopy pillar, waits a beat out of its light, then walks to the car and waits there,
+// fidgeting. He is still in view when the tape ends.
+function kwikJason(t) {
+  const { door, lookout, pillar, car } = KWIK;
+  if (t < 0.8) return null;
+  if (t < 3.5) return idle({ ...trip(t, 0.8, 1.9, door, lookout, 'jason-walk'), alpha: seg(t, 0.8, 1.05), turn: seg(t, 1.95, 2.25) }, t, seg(t, 2.25, 2.6));
+  if (t < 5.3) return { ...trip(t, 3.8, 5.0, lookout, pillar, 'jason-walk'), turn: 1 - seg(t, 3.5, 3.8) };
+  return idle({ ...trip(t, 5.3, 7.4, pillar, car, 'jason-walk'), turn: seg(t, 7.45, 7.8) }, t, seg(t, 7.8, 8.5));
+}
 
 function sceneKwik(g, t) {
   g.drawImage(IMG['bg-kwik'], 0, 0, W, H);
   neon(g, 'KWIK MART', 792, 168, 60, '#ff3fa4', flicker(t, 1));
   neon(g, '24/7', 1100, 168, 48, '#29e7ff');
   const screen = monitor(g, { x: 1068, y: 250, w: 64, h: 46 }, t);
-  // Jason is still out by the car when the tape ends: the pillar mid-walk is the only way to lose his face.
-  const J = t >= 0.8 ? walk(t, 0.8, 9.4, { x: 1110, y: 392, s: 0.6 }, { x: 656, y: 604, s: 1.05 }) : null;
-  if (J && t > 9.4) J.x += Math.sin((t - 9.4) * 2.2) * 5;
+  // The chopper slides in from the right, hovers over the store, then turns and climbs away.
+  const heliIn = t >= 3.0 && t < 11.6;
+  const hin = stroll(seg(t, 3.0, 4.9)), hout = stroll(seg(t, 9.0, 11.6));
+  const light = heliIn && helicopter(g, t, lerp(1470, 985, hin) + 580 * hout, 66 - 150 * hout, 230, lerp(-1, 1, smooth(seg(t, 8.6, 9.1))));
+  const J = kwikJason(t);
+  const copP = seg(t, 2.45, 3.4);
+  const copX = lerp(1760, -560, copP);
   const drawn = draw(g, [
-    J && { depth: J.y, draw: () => as('jason', crew(g, 'jason', J)) },
+    J && { depth: J.y, draw: () => as('jason', person(g, 'jason', J)) },
     { depth: 612, draw: () => {
       const car = sprite(g, 'car-purple-rear', 470, 612, 300);
       return { plate: plateIn(g, car.place, 'KWK 118'), body: car.rect };
     } },
+    // A cruiser tears across the forecourt right under the camera.
+    copP > 0 && copP < 1 && { depth: 718, draw: () => cruiser(g, t, copX, 718, 640, -1) },
     // The canopy pillar stands right in front of the camera.
     { depth: 900, draw: () => ({ body: sprite(g, 'pillar-canopy', 887, 740, 150).rect }) },
   ]);
-  const jason = drawn.find(d => d.jason)?.jason;
+  if (light) searchlight(g, light, { x: 890 + 330 * Math.sin((t - 5.3) * 1.05), y: 612 + 24 * Math.sin(t * 0.8), r: 120 }, seg(t, 4.0, 4.5) * (1 - seg(t, 8.5, 8.9)));
   const car = drawn.find(d => d.plate);
   return {
-    rects: { face: jason && { rect: jason.face, depth: jason.depth }, plate: { rect: car.plate, depth: car.depth }, screen: { rect: screen, depth: -1 } },
+    rects: { face: target(drawn.find(d => d.jason)?.jason), plate: { rect: car.plate, depth: car.depth }, screen: { rect: screen, depth: -1 } },
     blockers: blockers(drawn),
+    fx: { shake: copP > 0 && copP < 1 ? 0.55 * near(copX, 900) : 0, flash: 0 },
   };
+}
+
+const CAUSEWAY = { car: { x: 296, y: 606, s: 0.92 }, rail: { x: 870, y: 598, s: 0.9 }, back: { x: 300, y: 608, s: 0.92 } };
+
+// Lucia climbs out of the driver's side, strolls behind the car to the railing, turns to the camera for a long
+// stretch, then heads back.
+function causewayLucia(t) {
+  const { car, rail, back } = CAUSEWAY;
+  if (t < 1.4) return null;
+  // Stepping out: she rises from behind the car before she walks.
+  if (t < 5.1) return { ...trip(t, 1.7, 5.0, car, rail, 'lucia-walk'), drop: 90 * (1 - smooth(seg(t, 1.4, 2.0))) };
+  const stretch = t < 5.5 ? 0 : t < 5.85 ? 1 : t < 7.1 ? 2 : t < 7.45 ? 3 : 0;
+  const front = { front: 'lucia-stretch', frontFrame: stretch };
+  if (t < 9.1) return idle({ ...rail, sheet: 'lucia-walk', frame: ART['lucia-walk'].rest, ...front, turn: seg(t, 5.1, 5.45) }, t);
+  return { ...trip(t, 9.4, 12.9, rail, back, 'lucia-walk'), ...front, frontFrame: 0, turn: 1 - seg(t, 9.1, 9.4) };
 }
 
 function sceneCauseway(g, t) {
@@ -319,34 +600,42 @@ function sceneCauseway(g, t) {
   // Below the camera label, which covers the top of the sign.
   signText(g, [['LEONIDA CAUSEWAY', '700 30px Montserrat, sans-serif', 0], ['VICE CITY  →  EXIT 5A', '600 22px Montserrat, sans-serif', 40]], 112, 94);
   glints(g, t, { x: 520, y: 300, w: 760, h: 110 });
-  let L = null;
-  if (t >= 1.4) {
-    if (t < 5) L = walk(t, 1.4, 5, { x: 380, y: 650, s: 0.98 }, { x: 870, y: 598, s: 0.9 });
-    else if (t < 9.2) L = { x: 870 + Math.sin(t * 2) * 5, y: 598, s: 0.9, step: 0 };
-    else L = walk(t, 9.2, 12.6, { x: 870, y: 598, s: 0.9 }, { x: 400, y: 648, s: 0.98 });
-  }
+  const L = causewayLucia(t);
   const truckP = seg(t, 4.6, 8.4);
+  const truckX = lerp(1350, -1000, truckP);
+  const copP = seg(t, 2.2, 3.3);
   const drawn = draw(g, [
-    L && { depth: L.y, draw: () => as('lucia', crew(g, 'lucia', L)) },
+    // A cruiser flies down the far lane, behind the parked car.
+    copP > 0 && copP < 1 && { depth: 552, draw: () => cruiser(g, t, lerp(-460, 1760, copP), 552, 390, 1, { night: false, seed: 2 }) },
+    L && { depth: L.y, draw: () => as('lucia', person(g, 'lucia', L)) },
     { depth: 655, draw: () => {
       const car = sprite(g, 'car-orange-rear', 520, 655, 400);
       hazards(g, car.rect, t);
       const sticker = heartSticker(g, car.rect.x + car.rect.w * 0.66, car.rect.y + car.rect.h * 0.2, car.rect.w * 0.05);
       return { plate: plateIn(g, car.place, 'LCJ 0924'), sticker, body: car.rect };
     } },
-    truckP > 0 && truckP < 1 && { depth: 760, draw: () => ({ body: sprite(g, 'truck-box', lerp(1350, -1000, truckP), 760, 880).rect }) },
+    truckP > 0 && truckP < 1 && { depth: 760, draw: () => {
+      const bounce = Math.abs(Math.sin(t * 17)) * 2;
+      const { rect: r } = sprite(g, 'truck-box', truckX, 760 - bounce, 880);
+      kickup(g, t, r.x + r.w * 0.8, 748, -1, { n: 18, reach: 170, rise: 40, size: 9, color: '214,190,160', alpha: 0.32, seed: 4 });
+      // The cargo box, and the lower cab in front of it.
+      return { bodies: [{ x: r.x + r.w * 0.27, y: r.y, w: r.w * 0.73, h: r.h + bounce }, { x: r.x, y: r.y + r.h * 0.22, w: r.w * 0.27, h: r.h * 0.78 + bounce }] };
+    } },
   ]);
   const lucia = drawn.find(d => d.lucia)?.lucia;
   const car = drawn.find(d => d.plate);
   return {
     rects: {
       plate: { rect: car.plate, depth: car.depth },
-      face: lucia && { rect: lucia.face, depth: lucia.depth },
+      face: target(lucia),
       sticker: { rect: car.sticker, depth: car.depth },
     },
     blockers: blockers(drawn),
+    fx: { shake: truckP > 0 && truckP < 1 ? 0.7 * near(truckX, 1000) : 0, flash: 0 },
   };
 }
+
+const BANK = { door: { x: 60, y: 470, s: 0.78 }, rico: { x: 1010, y: 650, s: 1.06 } };
 
 function sceneBank(g, t) {
   g.drawImage(IMG['bg-bank'], 0, 0, W, H);
@@ -359,26 +648,30 @@ function sceneBank(g, t) {
   g.restore();
   glints(g, t, { x: 900, y: 120, w: 360, h: 420 }, 'rgba(255,240,200,0.35)', 18, 5);
   const slip = note(g, { x: 822, y: 290, w: 104, h: 40 }, [['DEPOSIT', 9], ['J. ACCT 0924', 10]]);
-  const J = { x: 430 + Math.sin(t * 0.8) * 4, y: 612, s: 1.0, step: 0 };
-  const L = { x: 700, y: 640, s: 1.06, step: 0 };
-  const R = t >= 2.6 ? walk(t, 2.6, 9.4, { x: 60, y: 470, s: 0.78 }, { x: 1010, y: 650, s: 1.06 }) : null;
-  const guard = t >= 5.4 && t < 10.6 ? walk(t, 5.4, 10.6, { x: 1420, y: 745, s: 1.45 }, { x: -170, y: 745, s: 1.45 }) : null;
+  const J = idle({ x: 430 + Math.sin(t * 0.8) * 4, y: 612, s: 1.0 }, t, 0.35);
+  const L = idle({ x: 700, y: 640, s: 1.06, tattoo: true }, t + 1.4, 0.15);
+  // Rico strolls in from the side door and stops to face the room.
+  const R = t < 2.45 ? null : idle({ ...trip(t, 2.6, 9.4, BANK.door, BANK.rico, 'rico-walk'), alpha: seg(t, 2.45, 2.75), turn: seg(t, 9.45, 9.8) }, t, 0.2 * seg(t, 9.8, 10.2));
+  const guard = t >= 5.4 && t < 10.6 ? trip(t, 5.4, 10.6, { x: 1420, y: 718, s: 1.4 }, { x: -170, y: 718, s: 1.4 }, 'guard-walk', steady) : null;
   const drawn = draw(g, [
-    { depth: J.y, draw: () => as('jason', crew(g, 'jason', J)) },
-    { depth: L.y, draw: () => as('lucia', crew(g, 'lucia', L, { tattoo: true })) },
-    R && { depth: R.y, draw: () => as('rico', crew(g, 'rico', R)) },
-    guard && { depth: guard.y, draw: () => extra(g, 'guard-bank', guard) },
+    { depth: J.y, draw: () => as('jason', person(g, 'jason', J)) },
+    { depth: L.y, draw: () => as('lucia', person(g, 'lucia', L)) },
+    R && { depth: R.y, draw: () => as('rico', person(g, 'rico', R)) },
+    guard && { depth: guard.y, draw: () => person(g, null, guard) },
   ]);
+  // The silent alarm trips late in the tape.
+  alarm(g, t, [[215, 125, 420], [1066, 125, 420]], seg(t, 8.2, 8.5));
   const pick = key => drawn.find(d => d[key])?.[key];
   const [jason, lucia, rico] = [pick('jason'), pick('lucia'), pick('rico')];
   return {
     rects: {
-      jface: { rect: jason.face, depth: jason.depth },
-      tattoo: { rect: lucia.tattoo, depth: lucia.depth },
-      rico: rico && { rect: rico.face, depth: rico.depth },
+      jface: target(jason),
+      tattoo: lucia.tattoo && { rect: lucia.tattoo, depth: lucia.depth },
+      rico: target(rico),
       slip: { rect: slip, depth: -1 },
     },
     blockers: blockers(drawn),
+    fx: { shake: 0, flash: 0 },
   };
 }
 
@@ -396,7 +689,19 @@ function sceneMarina(g, t) {
       const boat = sprite(g, 'speedboat', 380, 585 + Math.sin(t * 1.7) * 4, 640);
       return { reg: letterIn(g, boat.place, 'FL 4471 VC', '#10204a', 'IBM Plex Mono, monospace'), body: boat.rect };
     } },
-    jetP > 0 && jetP < 1 && { depth: 612, draw: () => ({ body: sprite(g, 'jetski', lerp(-380, 1450, jetP), 612 + Math.sin(t * 9) * 3, 330).rect }) },
+    // The jet ski skips from wave to wave, nose bucking, throwing a rooster tail of spray.
+    jetP > 0 && jetP < 1 && { depth: 612, draw: () => {
+      const x = lerp(-380, 1450, jetP), hop = Math.abs(Math.sin(t * 6.5)) * 12;
+      const a = ART.jetski, w = 330, h = (w * a.h) / a.w;
+      kickup(g, t, x - w * 0.36, 600, 1, { n: 26, reach: 230, rise: 70, size: 7, alpha: 0.7, seed: 9 });
+      g.save();
+      g.translate(x, 612 - hop);
+      g.rotate(-Math.cos(t * 6.5) * 0.06);
+      g.drawImage(IMG.jetski, -w / 2, -h, w, h);
+      g.restore();
+      kickup(g, t, x + w * 0.2, 606, -1, { n: 10, reach: 50, rise: 26, size: 5, alpha: 0.6, seed: 12 });
+      return { body: { x: x - w / 2, y: 612 - hop - h, w, h: h + hop } };
+    } },
     { depth: 690, draw: () => {
       const bag = sprite(g, 'duffel-cash', 880, 690, 250);
       const tag = note(g, { x: bag.rect.x + bag.rect.w * 0.74, y: bag.rect.y + bag.rect.h * 0.08, w: 52, h: 26 }, [['PROP. OF', 7], ['LUCIA', 8]], '#ffd23f');
@@ -412,47 +717,99 @@ function sceneMarina(g, t) {
       tag: { rect: get('tag').tag, depth: get('tag').depth },
     },
     blockers: blockers(drawn),
+    fx: { shake: jetP > 0 && jetP < 1 ? 0.12 * near(lerp(-380, 1450, jetP), 500) : 0, flash: 0 },
   };
+}
+
+const JEWELRY = {
+  jason: { x: 360, y: 470, s: 0.82 }, lucia: { x: 470, y: 478, s: 0.84 },
+  jcar: { x: 905, y: 668, s: 1.12 }, lcar: { x: 1080, y: 672, s: 1.12 },
+  rico: { x: 1340, y: 520, s: 0.9 }, ricoStop: { x: 760, y: 540, s: 0.92 },
+};
+
+// Grabbing from the smashed window (a dip now and then), a turn, a dash to the car, then a nervous wait by it.
+function jewelryRunner(t, start, from, to, sheet, seed) {
+  const go = start + 0.25, stop = go + 1.15;
+  if (t < start) return idle({ ...from, drop: 8 * Math.max(0, Math.sin(t * 2.2 + seed)) ** 4 * (1 - seg(t, start - 0.5, start)) }, t + seed, 0.4);
+  // Turn away from the camera to run, and back round to it at the car.
+  const turn = t < stop ? 1 - seg(t, start, go) : seg(t, stop + 0.05, stop + 0.35);
+  return idle({ ...trip(t, go, stop, from, to, sheet, dash), turn }, t + seed, seg(t, stop + 0.35, stop + 1));
+}
+
+// The tourist's routine: camera at the chest, up to the eye, flash, lower it with a grin. Flashes at 2.2, 5.5 and 8.8 s.
+function touristPhoto(t) {
+  const u = (((t - 0.15) % 3.3) + 3.3) % 3.3;
+  return { frame: u < 1.6 ? 0 : u < 2.0 ? 1 : u < 2.6 ? 2 : 3, flash: u < 2.05 ? 0 : clamp01((u - 2.05) / 0.02) * Math.exp(-(u - 2.07) * 12) };
 }
 
 function sceneJewelry(g, t) {
   g.drawImage(IMG['bg-jewelry'], 0, 0, W, H);
   neon(g, 'DIAMOND MILE JEWELERS', 150, 88, 44, '#ff4fd8', flicker(t, 4));
   const card = idCard(g, { x: 206, y: 590, w: 78, h: 48 });
-  // The crew only reach the car as the tape ends; the passing bus is the moment to catch them hidden.
-  const J = t >= 0.4 ? walk(t, 0.4, 11.2, { x: 360, y: 470, s: 0.82 }, { x: 905, y: 668, s: 1.12 }) : null;
-  const L = t >= 1.0 ? walk(t, 1.0, 11.6, { x: 470, y: 478, s: 0.84 }, { x: 1080, y: 672, s: 1.12 }) : null;
-  const R = t >= 2.2 ? walk(t, 2.2, 11.6, { x: 1340, y: 520, s: 0.9 }, { x: 760, y: 540, s: 0.92 }) : null;
-  const tourist = { x: 590, y: 560, s: 0.95, step: 0 };
+  const { jason, lucia, jcar, lcar, rico, ricoStop } = JEWELRY;
+  // The chopper arrives late and hangs over the towers, its searchlight hunting along the street.
+  const heliIn = t >= 7.3;
+  const light = heliIn && helicopter(g, t, lerp(1480, 1060, stroll(seg(t, 7.3, 9.0))), 112, 250, -1);
+  const L = jewelryRunner(t, 5.3, lucia, lcar, 'lucia-run', 1.7);
+  const J = jewelryRunner(t, 5.65, jason, jcar, 'jason-run', 0);
+  // Rico strolls up the sidewalk from the right while the crew run, then stops to watch.
+  const R = t < 4.5 ? null : idle({ ...trip(t, 4.5, 8.4, rico, ricoStop, 'rico-walk'), turn: seg(t, 8.45, 8.8) }, t, 0.15 * seg(t, 8.8, 9.2));
+  const photo = touristPhoto(t);
+  const tourist = { x: 590, y: 560, s: 0.95, sheet: 'tourist-photo', frame: photo.frame };
   const busP = seg(t, 5.8, 8.0);
+  const busX = lerp(-1400, 1450, busP);
+  const copP = seg(t, 2.9, 3.75);
+  const copX = lerp(-640, 1920, copP);
   const drawn = draw(g, [
-    { depth: tourist.y, draw: () => as('tourist', extra(g, 'bystander-tourist', tourist)) },
-    J && { depth: J.y, draw: () => as('jason', crew(g, 'jason', J)) },
-    L && { depth: L.y, draw: () => as('lucia', crew(g, 'lucia', L)) },
-    R && { depth: R.y, draw: () => as('rico', crew(g, 'rico', R)) },
+    { depth: tourist.y, draw: () => as('tourist', person(g, null, tourist)) },
+    { depth: J.y, draw: () => as('jason', person(g, 'jason', J)) },
+    { depth: L.y, draw: () => as('lucia', person(g, 'lucia', L)) },
+    R && { depth: R.y, draw: () => as('rico', person(g, 'rico', R)) },
     { depth: 708, draw: () => {
       const car = sprite(g, 'car-red-rear', 1000, 708, 380);
       return { plate: plateIn(g, car.place, 'VC 2HOT'), body: car.rect };
     } },
-    busP > 0 && busP < 1 && { depth: 770, draw: () => ({ body: sprite(g, 'bus-city', lerp(-1400, 1450, busP), 770, 1500).rect }) },
+    copP > 0 && copP < 1 && { depth: 752, draw: () => {
+      kickup(g, t, copX - 250, 745, 1, { n: 18, reach: 200, rise: 26, size: 8, color: '190,205,255', alpha: 0.3, seed: 6 });
+      return cruiser(g, t, copX, 752, 640, 1, { seed: 3 });
+    } },
+    busP > 0 && busP < 1 && { depth: 770, draw: () => {
+      const a = ART['bus-city'], w = 1500, h = (w * a.h) / a.w, y = 770 - h - Math.abs(Math.sin(t * 12)) * 2;
+      streaks(g, IMG['bus-city'], busX - w / 2, y, w, h, 1, 2, 0.035);
+      g.drawImage(IMG['bus-city'], busX - w / 2, y, w, h);
+      for (const fx of [0.2, 0.78]) kickup(g, t, busX - w / 2 + fx * w, 760, 1, { n: 14, reach: 220, rise: 34, size: 10, color: '190,205,255', alpha: 0.28, seed: 7 + fx });
+      return { body: { x: busX - w / 2, y, w, h: 770 - y } };
+    } },
   ]);
+  const tour = drawn.find(d => d.tourist)?.tourist;
+  // The flash goes off at the camera, just above the face box that the raised camera covers.
+  const burst = photo.flash > 0.01 && cameraFlash(g, tour.face.x + tour.face.w * 0.5, tour.face.y + tour.face.h * 0.35, photo.flash);
+  if (light) searchlight(g, light, { x: 930 + 240 * Math.sin((t - 8.2) * 1.2), y: 648, r: 135 }, seg(t, 8.0, 8.6));
+  alarm(g, t, [[664, 128, 520], [128, 128, 460]]);
   rain(g, t);
   const pick = key => drawn.find(d => d[key]);
-  const person = key => pick(key) && { rect: pick(key)[key].face, depth: pick(key).depth };
+  const face = key => pick(key) && target(pick(key)[key]);
+  const blocked = blockers(drawn);
+  if (burst) blocked.push({ depth: 1e4, rect: burst });
   return {
     rects: {
-      jface: person('jason'),
-      lface: person('lucia'),
+      jface: face('jason'),
+      lface: face('lucia'),
       plate: { rect: pick('plate').plate, depth: pick('plate').depth },
-      rico: person('rico'),
-      tourist: person('tourist'),
+      rico: face('rico'),
+      tourist: face('tourist'),
       card: { rect: card, depth: 638 },
     },
-    blockers: blockers(drawn),
+    blockers: blocked,
+    fx: {
+      shake: Math.max(busP > 0 && busP < 1 ? 0.85 * near(busX, 1300) : 0, copP > 0 && copP < 1 ? 0.45 * near(copX, 900) : 0),
+      flash: 0.4 * photo.flash,
+    },
   };
 }
 
 // Clocks shrink as the jobs get bigger; the tape's running time counts against the clock.
+// `cues` are the tape's sound moments, played by sound.cue(name) as the tape reaches them.
 export const CASES = [
   {
     id: 'kwik',
@@ -461,13 +818,14 @@ export const CASES = [
     seconds: 90,
     payout: 12000,
     clip: 12,
-    preview: 4,
+    preview: 4.0,
     brief: 'Jason hit the Kwik Mart on Ocean Drive and walked straight past the pump camera to the getaway car.',
-    tip: 'Jason passes behind the canopy pillar on his way to the car.',
+    tip: 'Jason ducks behind the canopy pillar while the chopper sweeps the lot.',
     draw: sceneKwik,
     cam: 'CAM 04',
     camPlace: 'KWIK MART #117 · VICE BEACH',
     time: '02:13:44',
+    cues: [{ at: 2.2, name: 'siren' }, { at: 2.75, name: 'screech' }, { at: 3.1, name: 'rotor' }],
     targets: r => [
       { key: 'face', kind: 'hide', label: "Jason's face", at: r.face },
       { key: 'plate', kind: 'hide', label: 'Getaway car plate', at: r.plate },
@@ -481,13 +839,14 @@ export const CASES = [
     seconds: 80,
     payout: 18000,
     clip: 12,
-    preview: 3.5,
+    preview: 3.6,
     brief: 'Toll camera caught the getaway car on the shoulder at sunset. Lucia stepped out to stretch. Of course she did.',
     tip: 'A box truck blocks the lane for a split second. Catch it covering both the plate and Lucia.',
     draw: sceneCauseway,
     cam: 'TOLL 5A',
     camPlace: 'LEONIDA CAUSEWAY · EASTBOUND',
     time: '19:47:02',
+    cues: [{ at: 2.0, name: 'siren' }, { at: 4.5, name: 'horn' }, { at: 4.9, name: 'rumble' }],
     targets: r => [
       { key: 'plate', kind: 'hide', label: 'License plate', at: r.plate },
       { key: 'face', kind: 'hide', label: "Lucia's face", at: r.face },
@@ -508,6 +867,7 @@ export const CASES = [
     cam: 'CAM 11',
     camPlace: 'BANK OF LEONIDA · LOBBY',
     time: '10:02:31',
+    cues: [{ at: 8.2, name: 'alarm' }],
     targets: r => [
       { key: 'jface', kind: 'hide', label: "Jason's face", at: r.jface },
       { key: 'tattoo', kind: 'hide', label: "Lucia's L+J tattoo", at: r.tattoo },
@@ -530,6 +890,7 @@ export const CASES = [
     camPlace: 'HARBOR PATROL · LEONIDA KEYS',
     stampLabel: 'Drone timestamp',
     time: '14:26:10',
+    cues: [{ at: 3.9, name: 'jetski' }, { at: 6.2, name: 'horn' }],
     targets: r => [
       { key: 'bag', kind: 'hide', label: 'Duffel bag of cash', at: r.bag },
       { key: 'reg', kind: 'hide', label: 'Boat registration', at: r.reg },
@@ -544,13 +905,17 @@ export const CASES = [
     seconds: 65,
     payout: 75000,
     clip: 12,
-    preview: 4.5,
+    preview: 10,
     brief: 'The big one. Street cam saw everything. Erase the crew and the plate, frame Rico, and leave the tourist alone.',
     tip: 'A bus sweeps the street while the crew run for the car. Wait for Rico to come up the sidewalk first.',
     draw: sceneJewelry,
     cam: 'CAM 22',
     camPlace: 'DIAMOND MILE · VICE CITY',
     time: '03:58:17',
+    cues: [
+      { at: 0.05, name: 'alarm' }, { at: 2.2, name: 'flash' }, { at: 2.7, name: 'siren' }, { at: 3.3, name: 'screech' },
+      { at: 5.5, name: 'flash' }, { at: 5.9, name: 'rumble' }, { at: 7.2, name: 'rotor' }, { at: 8.8, name: 'flash' },
+    ],
     targets: r => [
       { key: 'jface', kind: 'hide', label: "Jason's face", at: r.jface },
       { key: 'lface', kind: 'hide', label: "Lucia's face", at: r.lface },
@@ -695,7 +1060,7 @@ const IN_SHOT = 0.3;
 // Draws frame `t` of case `c` onto `g` and classifies every target:
 // `targets` are in shot, `gone` are hidden evidence that needs no edit, `missing` are KEEPs that must show but don't.
 function frame(g, c, t) {
-  const { rects, blockers: blocked } = c.draw(g, t);
+  const { rects, blockers: blocked, fx } = c.draw(g, t);
   const classify = spec => {
     const v = visibility(spec.at?.rect, spec.at?.depth ?? 0, blocked);
     return { ...spec, rect: v.rect, share: v.share, inShot: v.share >= IN_SHOT };
@@ -703,16 +1068,18 @@ function frame(g, c, t) {
   const all = c.targets(rects).map(classify);
   const surprise = c.surprise ? classify(c.surprise(rects)) : null;
   return {
-    targets: all.filter(x => x.inShot).map(strip),
-    gone: all.filter(x => !x.inShot && !(x.kind === 'keep' && x.mustShow)).map(strip),
-    missing: all.filter(x => !x.inShot && x.kind === 'keep' && x.mustShow).map(strip),
-    surprise: surprise?.inShot ? strip(surprise) : null,
+    targets: all.filter(x => x.inShot).map(bare),
+    gone: all.filter(x => !x.inShot && !(x.kind === 'keep' && x.mustShow)).map(bare),
+    missing: all.filter(x => !x.inShot && x.kind === 'keep' && x.mustShow).map(bare),
+    surprise: surprise?.inShot ? bare(surprise) : null,
     all,
+    fx: { shake: clamp01(fx?.shake ?? 0), flash: clamp01(fx?.flash ?? 0) },
   };
 }
-const strip = ({ at: _at, share: _share, inShot: _inShot, ...target }) => target;
+const bare = ({ at: _at, share: _share, inShot: _inShot, ...target }) => target;
 
-// Draws a live frame for the playing tape, with the fast overlay. Returns every target's status.
+// Draws a live frame for the playing tape, with the fast overlay. Returns every target's status, plus `fx`:
+// { shake, flash } (0..1) for the camera wobble and white-out the player should feel at this moment.
 export function drawLive(g, c, t) {
   const f = frame(g, c, t);
   const { lines, grain } = liveOverlay();

@@ -75,3 +75,38 @@ Each on a TRUE TRANSPARENT background (PNG alpha). If you cannot produce transpa
 1) bystander-tourist.png - 1024x1536 (portrait). A sunburnt middle-aged tourist in a loud floral shirt, cargo shorts, socks with sandals, a camera on a strap around the neck, bucket hat.
 2) guard-bank.png - 1024x1536 (portrait). A bank security guard in a navy uniform with a peaked cap, radio on the shoulder, clipboard in one hand.
 ```
+
+### Animation sheets and police vehicles
+
+A second batch added walk, run and gesture cycles for the moving characters, plus the VCPD cruiser and helicopter. These jobs used the same shared instructions, then these sheet rules, then their own brief. The crew atlas ([`source/crew-sprites-v2.png`](source/crew-sprites-v2.png)) was attached as `crew-reference.png`, and `guard-bank.png` and `bystander-tourist.png` as `guard-reference.png` and `tourist-reference.png`; those two single sprites are no longer used in the game. Some sheets came back truly transparent instead of green; `node scripts/import-art.mjs` accepts either, splits each sheet into its figures, tracks the head from frame to frame and redraws the frames as one even strip with the head centred and the feet on one baseline.
+
+```text
+SPRITE SHEET RULES (apply to every sheet below unless it says otherwise)
+- Canvas 1536x1024 split into an invisible grid of 2 rows x 4 columns: 8 equal cells of 384x512. Frames read left-to-right, top row first, and form ONE seamless looping cycle (frame 8 flows back into frame 1).
+- The character is in pure SIDE VIEW facing RIGHT, full body from head to shoes, the SAME size in every cell, feet on the same baseline about 20 px above the bottom of each cell, head about 20 px below the top. Keep the whole figure inside its own cell; nothing crosses into a neighbouring cell.
+- The character must look exactly like the reference: same face, hair, outfit, colours, proportions and illustration style. Clearly an adult.
+- Flat pure #00FF00 green background everywhere (no shadow, no floor, no gradient, no grid lines, no borders, no text, no frame numbers).
+```
+
+```text
+JOB: three WALK-cycle sprite sheets matching the attached crew-reference.png (a 4-column atlas: fixer, Jason, Lucia, Rico, left to right).
+A natural walk: alternating legs with a clear contact, passing and lift pose, opposite arms swinging, a slight up-and-down head bob.
+1) jason-walk.png - Jason (second figure: lime beanie, clear glasses, teal short-sleeved overshirt, cream tee, black cargo pants, lime-and-cream sneakers, silver chain). A tense, hurried walk.
+2) lucia-walk.png - Lucia (third figure: grey bandana, long straight black hair, hoop earrings, coral sleeveless jersey, dark indigo cargo jeans, white sneakers). A relaxed, confident walk.
+3) rico-walk.png - Rico (fourth figure: curly hair, his exact outfit from the reference). A swaggering, unhurried walk.
+```
+
+```text
+JOB: three sprite sheets matching the attached crew-reference.png (a 4-column atlas: fixer, Jason, Lucia, Rico, left to right).
+1) jason-run.png - Jason (second figure: lime beanie, clear glasses, teal overshirt, cream tee, black cargo pants, lime-and-cream sneakers). A full-speed RUN cycle: forward lean, long strides with both feet off the ground in the flight frames, arms pumping.
+2) lucia-run.png - Lucia (third figure: grey bandana, long black hair, hoop earrings, coral sleeveless jersey, indigo cargo jeans, white sneakers). The same full-speed RUN cycle, hair flowing back.
+3) lucia-stretch.png - Lucia again, but this sheet is DIFFERENT: FRONT view facing the camera (like the reference), 1 row x 4 columns of cells 384x1024 on the 1536x1024 canvas. Four frames of a stretch: (1) standing relaxed, arms at sides; (2) arms rising; (3) both arms stretched overhead, up on her toes; (4) arms coming back down. Same size and baseline in every cell. Both forearms visible and unmarked.
+```
+
+```text
+JOB: two sprite sheets and two vehicle sprites.
+1) guard-walk.png - the bank security guard from the attached guard-reference.png (navy uniform, peaked cap, radio on the shoulder, clipboard). A steady patrolling WALK cycle, following the sheet rules.
+2) tourist-photo.png - the tourist from the attached tourist-reference.png (floral shirt, bucket hat, camera on a strap). This sheet is DIFFERENT: FRONT view facing the camera, 1 row x 4 columns of cells 384x1024 on the 1536x1024 canvas. Four frames: (1) camera held at chest; (2) raising the camera; (3) camera at the eye with a bright white flash burst from it; (4) lowering the camera, grinning. Same size and baseline in every cell.
+3) police-cruiser.png - 1536x1024, NOT a sheet: one police cruiser in pure side view facing RIGHT, slightly from above, classic black-and-white livery with a roof light bar (lights drawn unlit), no text, no numbers, no badges, no real-world police markings. Flat pure #00FF00 background, no shadow.
+4) helicopter-police.png - 1536x1024, NOT a sheet: one dark blue-and-white police helicopter in side view facing RIGHT with a belly searchlight, rotor blades as a light motion blur, no text, no numbers, no markings. Flat pure #00FF00 background.
+```

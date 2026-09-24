@@ -14,7 +14,14 @@ try {
   await page.getByRole('button',{name:/Freeze frame/}).click();
   await page.waitForFunction(()=>document.querySelector('.timer')?.textContent.includes(':'),null,{timeout:90000});
   assert.ok(await page.locator('.editor-wrap canvas').count()>0, 'Live editor canvas');
-  if(i===0) await page.screenshot({path:'scripts/release-live-editor.png'});
+  if(i===0) {
+   await page.screenshot({path:'scripts/release-live-editor.png'});
+   // The Home dialog opens above the real editor, and Keep playing leaves the edit untouched.
+   await page.getByRole('button',{name:'Home',exact:true}).click();
+   assert.ok(await page.getByRole('button',{name:'Go to the homepage',exact:true}).isVisible(),'Home dialog over the live editor');
+   await page.getByRole('button',{name:'Keep playing',exact:true}).click();
+   assert.ok(await page.locator('.editor-wrap canvas').count()>0,'Editor survives Keep playing');
+  }
   await page.getByRole('button',{name:/Send to evidence/}).click();
   await page.waitForSelector('.ledger',{timeout:30000});
   console.log(`Live case ${i+1}:`,await page.locator('.stamp-text').innerText());
@@ -41,5 +48,9 @@ try {
  await mobile.screenshot({path:'scripts/release-live-mobile.png'});
  await mobile.getByRole('button',{name:/Send to evidence/}).click();
  await mobile.waitForSelector('.ledger',{timeout:30000});
- console.log('PASS live CDN: mobile editor, layout, submission and verdict');
+ await mobile.getByRole('button',{name:'Home',exact:true}).click();
+ await mobile.getByRole('button',{name:'Go to the homepage',exact:true}).click();
+ await mobile.waitForSelector('.ler-home');
+ assert.equal(await mobile.evaluate(()=>scrollY),0,'Home opens the landing page at the top');
+ console.log('PASS live CDN: mobile editor, layout, submission, verdict and Home');
 } finally { await browser.close(); }

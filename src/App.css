@@ -77,13 +77,15 @@ body,
   box-shadow: 0 8px 30px rgba(255, 79, 216, 0.35);
 }
 
-.sound-toggle {
+.sound-toggle,
+.home-toggle {
   gap: 6px;
   padding: 8px 12px;
   font-size: 12px;
 }
 
-.sound-toggle svg {
+.sound-toggle svg,
+.home-toggle svg {
   flex-shrink: 0;
   width: 16px;
   height: 16px;
@@ -684,6 +686,10 @@ body,
   .workspace-controls > span { display: none; }
 }
 @media (max-width: 480px) {
+  /* Home, the case label and Sound share rows instead of stacking. */
+  .brief-head { gap: 10px 12px; }
+  .case-no { letter-spacing: 0.1em; }
+  .hud-left { gap: 6px 10px; }
   .workspace-controls { gap: 5px; padding: 7px 8px; }
   .workspace-controls .btn { flex: 1; padding: 9px 6px; font-size: 10px; white-space: nowrap; }
   .workspace-controls .sound-toggle { flex: 0 0 auto; padding-inline: 9px; }
@@ -924,7 +930,7 @@ body,
 /* Touch screens: 44px minimum targets. */
 @media (pointer: coarse) {
   .btn { min-height: 44px; }
-  .sound-toggle { min-width: 44px; }
+  .sound-toggle, .home-toggle { min-width: 44px; }
 }
 
 /* ---------- Motion ---------- */
@@ -1143,11 +1149,16 @@ body,
   .board th, .board td { padding-inline: 5px; }
 }
 
-/* Quit */
-.quit-toggle { padding: 8px 12px; font-size: 12px; color: var(--muted); }
-.brief-head .sound-toggle + .quit-toggle { margin-left: -8px; }
-.quit-dialog {
-  max-width: min(420px, calc(100vw - 32px));
+/* Home, and the leave-this-run dialog */
+.home-toggle { color: var(--muted); }
+.home-toggle:hover { color: var(--text); }
+.screen-bar { display: flex; width: 100%; margin-bottom: 14px; }
+.screen.center { position: relative; }
+.screen.center .screen-bar { position: absolute; top: clamp(16px, 6.4vw, 32px); left: clamp(12px, 4vw, 20px); width: auto; }
+.screen.center [role='alert'] .actions { justify-content: flex-start; margin-top: 16px; }
+.home-dialog {
+  width: min(400px, calc(100vw - 32px));
+  max-width: none;
   padding: 24px;
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -1155,10 +1166,11 @@ body,
   color: var(--text);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
 }
-.quit-dialog::backdrop { background: rgba(13, 7, 20, 0.72); backdrop-filter: blur(3px); }
-.quit-dialog h3 { margin: 0 0 10px; font: 400 30px Anton, sans-serif; letter-spacing: 0.02em; color: var(--gold); }
-.quit-dialog p { margin: 0 0 20px; line-height: 1.6; color: var(--muted); }
-.quit-dialog .actions { justify-content: flex-end; }
+.home-dialog::backdrop { background: rgba(13, 7, 20, 0.72); backdrop-filter: blur(3px); }
+.home-dialog h3 { margin: 0 0 10px; font: 400 30px Anton, sans-serif; letter-spacing: 0.02em; color: var(--gold); }
+.home-dialog p { margin: 0 0 20px; line-height: 1.6; color: var(--muted); }
+.home-dialog .actions { flex-direction: column; align-items: stretch; gap: 10px; }
+.home-dialog .btn { padding-block: 12px; }
 
 /* Live tape */
 .feed canvas { display: block; width: 100%; height: 100%; }
@@ -1185,9 +1197,87 @@ body,
 .feed .roll-tape span { color: var(--bad); font-size: 22px; }
 .tape-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 5px; background: rgba(0, 0, 0, 0.5); }
 .tape-bar i { display: block; height: 100%; background: var(--bad); box-shadow: 0 0 10px var(--bad); }
-.feed.flash::after { content: ''; position: absolute; inset: 0; background: #fff; animation: flash 0.22s ease-out forwards; }
 @keyframes flash { from { opacity: 0.95; } to { opacity: 0; } }
 .feed .box { animation: none; transition: none; }
+.feed-col { min-width: 0; }
+.feed { container-type: inline-size; }
+/* Scene flashes: the loop sets the opacity each frame. */
+.fx-flash { position: absolute; inset: 0; z-index: 3; background: #fff; opacity: 0; pointer-events: none; }
+
+/* VCR moments: static and tracking lines as the tape spins up, a flash and a jittering held frame on pause. */
+:root { --vhs-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='100' filter='url(%23n)'/%3E%3C/svg%3E"); }
+.vhs { position: absolute; inset: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+.vhs-noise { position: absolute; inset: -40px; opacity: 0; background: repeating-linear-gradient(#0000 0 2px, #0007 2px 3px), var(--vhs-noise) 0 0 / 180px 100px; }
+.vhs-band { position: absolute; left: 0; right: 0; bottom: 13%; height: 7%; opacity: 0; background: var(--vhs-noise) 0 0 / 180px 100px; mix-blend-mode: screen; }
+.vhs-osd { position: absolute; left: 3.5%; top: 12%; font: 700 clamp(13px, 3.4cqw, 34px)/1 'IBM Plex Mono', monospace; letter-spacing: 0.08em; color: #fff; text-shadow: 2px 0 var(--pink), -2px 0 var(--cyan), 0 0 14px #000; }
+.vhs-play .vhs-noise { animation: vhsGrain 0.1s steps(3) 7, vhsFade 0.7s ease-out forwards; }
+.vhs-play .vhs-band { animation: vhsTrack 0.7s cubic-bezier(0.3, 0, 0.7, 1) forwards; }
+.vhs-play canvas { animation: vhsWarp 0.7s steps(1, end); }
+.vhs-play .vhs-osd { animation: osdOut 2.4s forwards; }
+.feed.vhs-pause::after { content: ''; position: absolute; inset: 0; z-index: 5; background: #fff; opacity: 0; pointer-events: none; animation: flash 0.3s ease-out; }
+.vhs-pause .vhs-band { opacity: 0.8; animation: vhsHold 0.16s steps(2) infinite; }
+.vhs-pause canvas { animation: vhsJitter 0.16s steps(2) infinite; }
+.vhs-pause .vhs-osd { animation: blink 0.8s steps(2) infinite; }
+@keyframes vhsGrain { 33% { background-position: 0 1px, -60px 30px; } 66% { background-position: 0 2px, 40px -50px; } }
+@keyframes vhsFade { from { opacity: 0.95; } 45% { opacity: 0.55; } to { opacity: 0; } }
+@keyframes vhsTrack { from { bottom: -25%; height: 24%; opacity: 0.9; } to { bottom: 110%; height: 6%; opacity: 0.4; } }
+@keyframes vhsWarp {
+  0% { transform: scaleY(0.02); filter: brightness(3) saturate(0); }
+  12% { transform: skewX(-8deg) translateX(-3%); filter: brightness(1.8) contrast(0.7) saturate(0.3); }
+  26% { transform: skewX(5deg) translateX(2%); filter: hue-rotate(60deg) saturate(1.8); }
+  40% { transform: translateX(-1.5%); filter: contrast(1.4) brightness(1.2); }
+  55% { transform: skewX(2deg); filter: hue-rotate(-30deg); }
+  70% { transform: none; filter: none; }
+}
+@keyframes osdOut { 0%, 75% { opacity: 1; } to { opacity: 0; } }
+@keyframes vhsJitter { 50% { transform: translateY(-3px); } }
+@keyframes vhsHold { 50% { transform: translateY(-8px) scaleY(1.4); background-position: 50px 20px; } }
+
+/* The frozen frame tears into slices and collapses as the lab cuts in. */
+.lab-cut { position: fixed; inset: 0; z-index: 70; pointer-events: none; background: #000 center / cover no-repeat; animation: labCut 0.6s steps(1, end) forwards; }
+.lab-cut::before, .lab-cut::after { content: ''; position: absolute; inset: 0; background: inherit; mix-blend-mode: screen; opacity: 0.55; }
+.lab-cut::before { transform: translateX(-1.6%); filter: sepia(1) saturate(8) hue-rotate(260deg); }
+.lab-cut::after { transform: translateX(1.6%); filter: sepia(1) saturate(8) hue-rotate(140deg); }
+@keyframes labCut {
+  0% { clip-path: inset(0); }
+  10% { clip-path: inset(12% 0 58% 0); transform: translateX(-5%); }
+  20% { clip-path: inset(55% 0 20% 0); transform: translateX(6%); }
+  30% { clip-path: inset(30% 0 48% 0); transform: translateX(-3%) skewX(10deg); }
+  40% { clip-path: inset(70% 0 8% 0); transform: translateX(9%); }
+  50% { clip-path: inset(5% 0 85% 0); transform: translateX(-7%); }
+  62% { clip-path: inset(46% 0 46% 0); transform: none; filter: brightness(2.5); }
+  78% { clip-path: inset(49.6% 0 49.6% 0); filter: brightness(4); }
+  100% { clip-path: inset(50% 0 50% 0); opacity: 0; }
+}
+
+/* VCPD dispatch ticker */
+.dispatch { display: flex; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: #0b0612; font: 600 12px/1.2 'IBM Plex Mono', monospace; letter-spacing: 0.03em; }
+.feed-col .dispatch { margin-top: 10px; }
+.dispatch-tag { flex-shrink: 0; display: flex; align-items: center; gap: 7px; padding: 7px 10px; background: #1d3a8f; color: #fff; font-size: 11px; letter-spacing: 0.12em; }
+.dispatch-tag i { width: 7px; height: 7px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: blink 1.2s steps(2) infinite; }
+.dispatch.urgent .dispatch-tag { background: #c21d3d; }
+.dispatch.urgent .dispatch-tag i { background: #fff; box-shadow: 0 0 8px #fff; animation-duration: 0.5s; }
+.dispatch-window { flex: 1; min-width: 0; display: flex; align-items: center; overflow: hidden; mask-image: linear-gradient(90deg, #0000, #000 14px, #000 calc(100% - 28px), #0000); }
+.dispatch-track, .dispatch-line { margin: 0; white-space: nowrap; color: #bfe9ff; }
+.dispatch-track { display: flex; width: max-content; animation: ticker var(--ticker, 40s) linear infinite; }
+.dispatch:hover .dispatch-track { animation-play-state: paused; }
+.dispatch-track > span { display: flex; }
+.dispatch-track span span { padding-left: 14px; }
+.dispatch-track span span::after { content: '///'; margin-left: 14px; color: #ffffff40; }
+.dispatch-line { padding: 0 14px; overflow: hidden; text-overflow: ellipsis; }
+.dispatch .hot { color: #ffb3c1; }
+.dispatch.urgent .hot { color: #fff; }
+@keyframes ticker { to { transform: translateX(-50%); } }
+.lab .dispatch { flex-shrink: 0; border-width: 0 0 1px; border-radius: 0; }
+.lab.workspace-expanded .dispatch { display: none; }
+@media (max-width: 480px) {
+  .dispatch { font-size: 11px; }
+  .dispatch-tag { padding: 5px 8px; font-size: 10px; letter-spacing: 0.08em; }
+}
+/* Short screens and landscape phones need every pixel of height for the editor. */
+@media (max-height: 600px) {
+  .lab .dispatch { display: none; }
+}
 .btn.freeze { background: linear-gradient(90deg, #ff3b5c, #ff4fd8); color: #fff; }
 .btn kbd { padding: 2px 6px; border: 1px solid rgba(255, 255, 255, 0.5); border-radius: 5px; font: 600 11px 'IBM Plex Mono', monospace; }
 .tape-tip { margin: 0 0 14px; color: var(--muted); line-height: 1.6; font-size: 14px; }

@@ -33,16 +33,30 @@ function editorDouble() {
   };
 }
 
+// The widest TOP FIXER readout: the longest name the board accepts and the biggest possible cash.
+const board = { top: [{ id: 'lead', name: 'Maximiliana Vargas', cash: 236450, time: 290 }], total: 1 };
+
 // Runs in the page. Controls are probed 20px beyond each edge too, so enlarged invisible hit areas count.
-function inspect({ touch }) {
+// `scope` limits the check to one part of the page, such as an open dialog.
+function inspect({ touch, scope }) {
   const problems = [];
   if (innerWidth !== document.documentElement.clientWidth || document.documentElement.scrollWidth > innerWidth) problems.push(`page is ${document.documentElement.scrollWidth}px wide`);
   const shown = el => !el.closest('[inert], [aria-hidden="true"]') && el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
   const name = el => (el.getAttribute('aria-label') || el.textContent || el.className).trim().replace(/\s+/g, ' ').slice(0, 30);
+  const root = scope ? document.querySelector(scope) : document.body;
   // Controls scrolled under the homepage's fixed nav are hidden by scrolling, not by the layout.
   const nav = document.querySelector('.ler-nav');
   const navBottom = nav ? nav.getBoundingClientRect().bottom : 0;
-  for (const el of document.querySelectorAll('a[href], button:not(:disabled), input')) {
+  // The hero's TOP FIXER readout must not overlap the rest of the hero HUD.
+  const readout = document.querySelector('.ler-top-fixer');
+  if (!scope && readout && shown(readout) && scrollY === 0) {
+    const r = readout.getBoundingClientRect();
+    for (const el of document.querySelectorAll('.ler-hud, .ler-location, .ler-hero-copy > *, .ler-scroll, .ler-nav a')) {
+      const o = el.getBoundingClientRect();
+      if (shown(el) && r.left < o.right && o.left < r.right && r.top < o.bottom && o.top < r.bottom) problems.push(`TOP FIXER overlaps "${name(el)}"`);
+    }
+  }
+  for (const el of root.querySelectorAll('a[href], button:not(:disabled), input')) {
     if (!shown(el)) continue;
     const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     if (cy < 0 || cy > innerHeight || (!nav?.contains(el) && cy < navBottom)) continue;
@@ -54,7 +68,7 @@ function inspect({ touch }) {
     const wide = r.width >= 43.5 || (at(cx - 20, cy) && at(cx + 20, cy));
     if (!tall || !wide) problems.push(`"${name(el)}" is a ${Math.round(r.width)}x${Math.round(r.height)} touch target`);
   }
-  for (const el of document.querySelectorAll('body *')) {
+  for (const el of root.querySelectorAll('*')) {
     if (![...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()) || !shown(el) || el.closest('.ler-redaction')) continue;
     if (parseFloat(getComputedStyle(el).fontSize) < 9) problems.push(`"${name(el)}" is ${getComputedStyle(el).fontSize} text`);
   }
@@ -69,15 +83,17 @@ try {
     const page = await context.newPage();
     page.on('pageerror', e => errors.push(e.message));
     await page.addInitScript(editorDouble);
-    const check = async screen => {
+    await page.route('**/api/leaderboard', route => (route.request().method() === 'GET' ? route.fulfill({ json: board }) : route.continue()));
+    const check = async (screen, scope) => {
       // Let entrance animations settle so measurements reflect the resting layout.
       await page.waitForTimeout(150);
-      const problems = await page.evaluate(inspect, { touch: !!device.touch });
+      const problems = await page.evaluate(inspect, { touch: !!device.touch, scope });
       assert.deepEqual(problems, [], `${device.name}, ${screen}`);
     };
     await page.goto(base);
     await page.waitForSelector('.ler-play button:not([disabled])');
     await page.evaluate(() => document.fonts.ready);
+    await page.waitForSelector('.ler-top-fixer');
     for (const selector of ['.ler-hero-copy .ler-button', '.ler-powered']) {
       const box = await page.locator(selector).boundingBox();
       assert.ok(box.y + box.height <= device.height, `${device.name}: ${selector} is below the first screen`);
@@ -94,6 +110,12 @@ try {
       await page.getByRole('button', { name: /Freeze frame/ }).click();
       await page.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'));
       await check(`lab ${i + 1}`);
+      // The Home dialog (with all three choices once a job is finished) fits and is easy to tap.
+      if (i === 1) {
+        await page.getByRole('button', { name: 'Home', exact: true }).click();
+        await check('Home dialog', 'dialog[open]');
+        await page.getByRole('button', { name: 'Keep playing', exact: true }).click();
+      }
       await page.getByRole('button', { name: /Send to evidence/ }).click();
       await page.waitForSelector('.ledger');
       await check(`verdict ${i + 1}`);

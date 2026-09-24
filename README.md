@@ -43,10 +43,10 @@ Lucia and Jason pulled five jobs across Leonida, and the VCPD has every one on t
 ## Highlights
 
 - **The editor is the game.** Draw, shapes, stickers, text, crop, filters and, where the Unlayer project allows it, the AI Assistant are all tools for making evidence disappear.
-- **Five live CCTV tapes.** Each job plays as a short animated clip in an illustrated Leonida location. Freeze the moment you want to doctor: evidence behind a passing truck, bus or pillar needs no edit, but the clock is already running.
+- **Five live CCTV tapes.** Each job plays as a short animated clip in an illustrated Leonida location: the crew walk and run with proper cycles, VCPD cruisers tear past with their light bars flashing, a helicopter sweeps its searchlight, alarms strobe and a tourist's camera flashes. Freeze the moment you want to doctor: evidence behind a passing truck, bus or pillar needs no edit, but the clock is already running.
 - **Faces, plates, a tattoo and a bag of cash to hide**, a timestamp you must not touch, Rico to frame and a tourist to leave alone.
 - **Pixel forensics** that line up crops, forgive colour grades and catch whatever is still visible.
-- **Heat pressure and surprises.** Wanted stars bring sirens, camera shake and jammed tools on the next tape, and detectives spot new evidence while you edit.
+- **Heat pressure and surprises.** Wanted stars bring sirens, camera shake and jammed tools on the next tape, a VCPD dispatch ticker gets more urgent, and detectives spot new evidence while you edit.
 - **Payouts, ranks and a global leaderboard**, ending in a rap-sheet poster you can download and share. Finished runs post their cash and time; most cash wins and faster hands break ties.
 - **Sound, motion and responsive layouts** from phone to widescreen, with a mute button and reduced-motion support.
 
@@ -57,7 +57,9 @@ Lucia and Jason pulled five jobs across Leonida, and the VCPD has every one on t
 3. **Doctor the still.** Draw over faces, drop shapes or stickers, add text, or crop the evidence out. Filters are allowed, but a global blur also wipes out the timestamp. A few seconds in, detectives may **ENHANCE** and spot something new to hide, with a little extra time.
 4. **Send it to evidence** before the clock runs out. At zero, whatever is on the canvas goes in as it is.
 5. **Face forensics.** Every piece of evidence left visible, every tampered KEEP and every must-show KEEP missing from the shot adds a wanted star. Heat carries into the next tape: one star brings sirens, two add camera shake, three jam the stickers and four the shapes. Five stars and you're **BUSTED**. After the scan, drag across the tape to compare the original with your edit.
-6. **Collect your rap sheet.** Finish all five jobs, get caught, or walk away with **Quit**, for a poster of your doctored stills, heat and cash. Runs that finish all five jobs can be posted to the leaderboard.
+6. **Collect your rap sheet.** Finish all five jobs, get caught, or walk away, for a poster of your doctored stills, heat and cash. Runs that finish all five jobs can be posted to the leaderboard, which sits near the top of the homepage.
+
+The **Home** button on every screen takes you back to the landing page. Mid-run it asks first, and offers your rap sheet so far once you've finished a job.
 
 > [!TIP]
 > Need more room to paint? Choose your brush, then **Hide tool settings**: drawing stays active. **Hide orders** frees the sidebar, and **Full screen** expands the workspace without losing your edits. The clock keeps running while you rearrange.
@@ -103,7 +105,7 @@ flowchart LR
   verdict -->|five stars| busted[BUSTED]
   verdict -->|all five jobs done| sheet[Rap sheet poster]
   busted --> sheet
-  brief -.->|Quit| sheet
+  brief -.->|Home: walk away| sheet
   sheet -->|Run it back| brief
 
   classDef step fill:#22143a,stroke:#8e75d7,color:#f6ecff
@@ -144,7 +146,9 @@ The verdict screen then replays the check box by box, and a scrubbed face comes 
 
 Each tape is a 12-second animated clip drawn by [`src/scenes.js`](src/scenes.js). Jason walks out of the Kwik Mart past a canopy pillar, a box truck blots out the causeway, Rico walks into the bank late while a guard crosses the lobby, his yacht cruises into the marina as a jet ski passes our hull, and the crew run for the car on the Diamond Mile as a bus sweeps the street in the rain. Every frame returns exact evidence bounds and what was drawn in front of them, so the game can tell which evidence is in the shot at the moment you freeze.
 
-The backgrounds, vehicles, props and bystanders were generated for this project with OpenAI's image generation through Codex, using the crew illustrations as the style reference ([prompts](artwork/CODEX-SCENES.md)). `node scripts/import-art.mjs` crops, keys and trims them into `public/art/scenes/` and measures the placeholder on each car and boat where the game paints plates and lettering. The crew illustrations come from [`artwork/`](artwork/ARTWORK.md) through `node scripts/optimize-art.mjs`, and [`src/avatars.js`](src/avatars.js) maps each face and Lucia's tattoo into scene coordinates. The homepage's "Powered by Unlayer" badge and footer credit use Unlayer's official white wordmark, resized to `public/brand/unlayer-logo-white.webp`.
+The crew, the bank guard and the tourist animate from Codex-generated sprite sheets: side-view walk and run cycles (mirrored for leftward moves), Lucia's stretch and the tourist's photo poses, with short turns between side and front views. Frames advance with the ground covered, so feet don't skate, and each frame carries its own face box, so side-on faces stay exact evidence. Police cruisers, the helicopter's searchlight, alarm strobes, the camera flash, dust and spray are drawn in code over the art; the tape also reports camera shake and flash strength, and timed sound cues, to the screen that plays it.
+
+The backgrounds, vehicles, props, bystanders and animation sheets were generated for this project with OpenAI's image generation through Codex, using the crew illustrations as the style reference ([prompts](artwork/CODEX-SCENES.md)). `node scripts/import-art.mjs` crops, keys and trims them into `public/art/scenes/`, measures the placeholder on each car and boat where the game paints plates and lettering, and slices each sprite sheet into an even frame strip with per-frame face and body boxes. The crew illustrations come from [`artwork/`](artwork/ARTWORK.md) through `node scripts/optimize-art.mjs`, and [`src/avatars.js`](src/avatars.js) maps each face and Lucia's tattoo into scene coordinates. The homepage's "Powered by Unlayer" badge and footer credit use Unlayer's official white wordmark, resized to `public/brand/unlayer-logo-white.webp`.
 
 ### Leaderboard
 
@@ -160,7 +164,7 @@ The backgrounds, vehicles, props and bystanders were generated for this project 
 - a stamp, or a jail-door clang, when the verdict lands
 - coins on the payout
 
-The files are WAV because Safari can't decode OGG. Under heat pressure a police siren, synthesized in code, wails as the lab opens. The **Sound** button on the tape, lab and verdict screens mutes everything and remembers the choice.
+The files are WAV because Safari can't decode OGG. Everything else is synthesized in code: the tapes' sirens, tyre screeches, air horns, rumbles, rotors, alarm bells, camera flashes and jet ski, and the siren that wails as the lab opens under heat pressure. The **Sound** button on the tape, lab and verdict screens mutes everything and remembers the choice.
 
 ### Project structure
 
@@ -206,13 +210,13 @@ Run `npm run check` (lint and build), then start `npm run preview -- --host 127.
 
 | Command | Server | What it covers |
 |---|---|---|
-| `npm run test:release` | Preview, port 5201 | The production build with a deterministic editor double: five clean jobs, poster download, a leaderboard post, replay, recovery from loading, export and analysis failures, mobile layout, out-of-sight evidence, the mid-edit surprise, quitting, the board offline, countdown expiry, heat carrying over, sound files and the mute setting |
+| `npm run test:release` | Preview, port 5201 | The production build with a deterministic editor double: five clean jobs, poster download, a leaderboard post, replay, recovery from loading, export and analysis failures, mobile layout, out-of-sight evidence, the mid-edit surprise, the Home button and walking away, the hero's TOP FIXER readout, the board offline, countdown expiry, heat carrying over, sound files and the mute setting |
 | `npm run test:leaderboard` | None | Leaderboard rules and handler: impossible runs refused, ranking, names, rate limit and error responses |
 | `node scripts/release-live.mjs` | Preview, port 5201 | The real hosted editor: three jobs to a bust, the BUSTED stamp, poster download and the mobile editor. Needs network access |
 | `npm run test:workspace` | Preview, port 5201 | The live editor at three widths: collapsed tool settings, drawing, full screen, tall panels and filters that are still open when you submit |
 | `npm run test:home` | Dev, port 5200 | The landing page at four widths and with reduced motion, plus the `/#play` deep link |
 | `npm run test:responsive` | Dev, port 5200 | Every screen, played through to a bust, on phones in both orientations, a tablet and a desktop: no sideways overflow, no covered controls, 44px touch targets, no text under 9px, and the hero's call to action on the first screen |
-| `npm run test:avatars` | Dev, port 5200 | Scene art and forensic scoring for all five jobs, plus the live tape's out-of-sight and must-show rules |
+| `npm run test:avatars` | Dev, port 5200 | Scene art and forensic scoring for all five jobs, the live tape's out-of-sight and must-show rules and timing windows, the animation strips' face boxes, `fx` and the sound cues |
 
 Set `HOME_TEST_URL` to point a suite at another server, and `BROWSER_CHANNEL=chrome` to test in Chrome instead of Microsoft Edge.
 

@@ -8,6 +8,7 @@ const ART = '/art/leonida-crew-v2.webp';
 const UNLAYER = 'https://unlayer.com/';
 const clamp = (n) => Math.max(0, Math.min(1, n));
 const pad = (n) => String(n + 1).padStart(2, '0');
+const money = (n) => `$${n.toLocaleString('en-US')}`;
 
 function Arrow() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15m-6-6 6 6-6 6" /></svg>;
@@ -28,6 +29,7 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
   const mission = CASES[selected];
   const scene = scenes?.[selected];
   const [{ board, error: boardError }] = useLeaderboard();
+  const leader = board?.top[0];
 
   useEffect(() => {
     const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -63,7 +65,7 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
   return (
     <main className="ler-home" id="top">
       <nav className={`ler-nav ${scrolled ? 'is-scrolled' : ''}`} aria-label="Main navigation">
-        <a href="#how">HOW IT WORKS</a><a href="#evidence">THE EVIDENCE</a>
+        <a href="#how">HOW IT WORKS</a><a href="#leaders">LEADER<wbr />BOARD</a>
         <a className="ler-mark" href="#top" aria-label="Leonida Evidence Room home">L<span>★</span></a>
         <a href="#cases">CASE FILES</a><a href="#play">PLAY NOW <span aria-hidden="true">↗</span></a>
       </nav>
@@ -90,6 +92,12 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
                 <a className="ler-powered" href={UNLAYER} target="_blank" rel="noopener noreferrer"><span>POWERED BY</span><UnlayerLogo /></a>
               </div>
               <div className="ler-hud"><span>HEAT LEVEL</span><b aria-label="Zero of five wanted stars">☆☆☆☆☆</b><i /><small>KEEP IT CLEAN.</small></div>
+              {/* The live #1 from the leaderboard, in the HUD's corner where GTA keeps your cash. Hidden while loading or offline. */}
+              {board && <a className="ler-top-fixer" href="#leaders" title={leader ? `${leader.name}: ${money(leader.cash)}` : undefined}>
+                <span><i aria-hidden="true" />TOP FIXER</span>
+                <b>{leader ? money(leader.cash) : 'UNCLAIMED'}</b>
+                <small>{leader ? `#1 ${leader.name}` : 'BE THE FIRST'}</small>
+              </a>}
               <div className="ler-location"><span>25°46′ N / 80°11′ W</span><b>LEONIDA, AFTER HOURS.</b></div>
               <a href="#how" className="ler-scroll">SCROLL TO GO UNDERGROUND <span aria-hidden="true">↓</span></a>
             </div>
@@ -111,6 +119,16 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
         <a className="ler-button" href="#evidence">TAKE A CLOSER LOOK <Arrow /></a>
       </section>
 
+      <section id="leaders" className="ler-leaders ler-grid-bg" aria-labelledby="leaders-title">
+        <div className="ler-section-top"><span>02 / MOST WANTED</span><span>CLEAN RUNS ONLY</span></div>
+        <h2 id="leaders-title" className="ler-heading">TOP FIXERS.<span className="ler-index">02</span></h2>
+        <p className="ler-subheading">Most cash wins. Faster hands break ties.</p>
+        {board?.top.length ? <LeaderboardTable className="ler-board" rows={boardRows(board)} />
+          : <p className="ler-board-note" role="status">{board ? 'No clean runs yet. Finish all five jobs to take the top spot.' : boardError || 'Pulling the file…'}</p>}
+        <p className="ler-board-note">{board?.total ? `${board.total} clean run${board.total === 1 ? '' : 's'} on file. ` : ''}Only runs that finish all five jobs count. Time is the clock you used across the jobs.</p>
+        <a className="ler-button ler-button-pink" href="#play">TAKE THE TOP SPOT <Arrow /></a>
+      </section>
+
       <section id="evidence" className="ler-evidence" aria-labelledby="evidence-title">
         <div className="ler-demo ler-grid-bg">
           <div className="ler-demo-header"><span><i /> VCPD / LIVE EVIDENCE</span><span>TAPE {pad(selected)}</span></div>
@@ -130,8 +148,8 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
           <p className="ler-demo-note">Interactive preview. Your actual edits happen in the game.</p>
         </div>
         <div className="ler-evidence-copy">
-          <p className="ler-kicker">02 / THE ART OF GETTING AWAY</p>
-          <h2 id="evidence-title" className="ler-heading">NO FACE.<br />NO CASE.<span className="ler-index">02</span></h2>
+          <p className="ler-kicker">03 / THE ART OF GETTING AWAY</p>
+          <h2 id="evidence-title" className="ler-heading">NO FACE.<br />NO CASE.<span className="ler-index">03</span></h2>
           <p className="ler-subheading">The most dangerous thing<br />in Leonida? A clear picture.</p>
           <div className="ler-dots" aria-hidden="true">▪ ▪ ▪ ▪ ▪ ▪ ▪ ▪ ▪</div>
           <p>Lucia and Jason pulled five jobs. The VCPD has every one on tape. You’re the fixer with an image editor and a very short window to make the evidence go away.</p>
@@ -141,23 +159,14 @@ export default function Home({ ready, alias, setAlias, onStart, scenes }) {
       </section>
 
       <section id="cases" className="ler-cases ler-grid-bg" aria-labelledby="cases-title">
-        <div className="ler-section-top"><span>03 / THE EVIDENCE LOCKER</span><span>HANDLE WITH EXTREME CREATIVITY</span></div>
-        <h2 id="cases-title" className="ler-heading">FIVE DIRTY JOBS.<span className="ler-index">03</span></h2>
+        <div className="ler-section-top"><span>04 / THE EVIDENCE LOCKER</span><span>HANDLE WITH EXTREME CREATIVITY</span></div>
+        <h2 id="cases-title" className="ler-heading">FIVE DIRTY JOBS.<span className="ler-index">04</span></h2>
         <p className="ler-subheading">A whole city of bad decisions. All caught on camera.</p>
         <div className="ler-tapes">{CASES.map((c, i) => <button key={c.id} className={`ler-tape ${selected === i ? 'is-selected' : ''}`} onClick={() => { setSelected(i); setWipe(55); }} aria-pressed={selected === i} aria-label={`Preview ${c.title}`}>
           <div className="ler-tape-image">{scenes?.[i] && <img src={scenes[i].dataUrl} alt="" loading="lazy" />}<span>{pad(i)}</span></div>
           <div className="ler-tape-label"><small>VCPD / TAPE {pad(i)}</small><h3>{c.title}</h3><span>{c.seconds} SEC <b>↗</b></span></div>
         </button>)}</div>
         <div className="ler-case-info" aria-live="polite" aria-atomic="true"><div><span>FILE {pad(selected)} / {mission.place}</span><p>{mission.brief}</p></div><div className="ler-case-payout"><span>MAX PAYOUT</span><b>${mission.payout.toLocaleString('en-US')}</b></div><a href="#evidence" className="ler-button">INSPECT TAPE <Arrow /></a></div>
-      </section>
-
-      <section id="leaders" className="ler-leaders ler-grid-bg" aria-labelledby="leaders-title">
-        <div className="ler-section-top"><span>04 / MOST WANTED</span><span>CLEAN RUNS ONLY</span></div>
-        <h2 id="leaders-title" className="ler-heading">TOP FIXERS.<span className="ler-index">04</span></h2>
-        <p className="ler-subheading">Most cash wins. Faster hands break ties.</p>
-        {board?.top.length ? <LeaderboardTable className="ler-board" rows={boardRows(board)} />
-          : <p className="ler-board-note" role="status">{board ? 'No clean runs yet. Finish all five jobs to take the top spot.' : boardError || 'Pulling the file…'}</p>}
-        <p className="ler-board-note">Only runs that finish all five jobs count. Time is the clock you used across the jobs.</p>
       </section>
 
       <section id="play" className="ler-play" aria-labelledby="play-title">

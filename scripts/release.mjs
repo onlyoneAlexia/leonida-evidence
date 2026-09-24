@@ -54,6 +54,8 @@ async function openGame(mode = 'clean', width = 1440) {
   }, mode);
   await page.goto(base);
   await page.waitForSelector('.ler-play button:not([disabled])');
+  // In through the hero's #play link, so going home has an anchor to clear.
+  await page.getByRole('link', { name: /GET TO WORK/ }).click();
   await page.locator('#fixer-alias').fill('Release Tester');
   await page.locator('.ler-play button').click();
   return page;
@@ -71,6 +73,14 @@ async function freezeAt(page, at = 0.3) {
 async function ready(page) {
   await page.waitForFunction(() => document.querySelector('.timer')?.textContent.includes(':'));
 }
+const homeButton = page => page.getByRole('button', { name: 'Home', exact: true });
+// Going home lands on the landing page at the top, with the #play anchor cleared.
+async function assertHome(page, from) {
+  await page.waitForSelector('.ler-home');
+  await page.waitForSelector('.ler-play button:not([disabled])');
+  assert.deepEqual(await page.evaluate(() => [scrollY, location.hash]), [0, ''], `Home from ${from} opens the landing page at the top`);
+  assert.equal(await page.locator('dialog[open]').count(), 0);
+}
 
 try {
   const clean = await openGame();
@@ -83,11 +93,29 @@ try {
   await sound.click();
   assert.equal(await sound.getAttribute('aria-pressed'), 'true');
   for (let i = 0; i < 5; i++) {
+    if (i === 0) {
+      assert.equal(await homeButton(clean).count(), 1, 'Home on the tape');
+      // With reduced motion the chatter changes line by line, so this job's calls come round within a few seconds.
+      await clean.locator('.feed-col [role=marquee]').filter({ hasText: /Kwik Mart|Ocean/ }).waitFor({ timeout: 12000 });
+    }
     // Late in the clip every KEEP that must show (Rico, his yacht) is in the shot.
     await freezeAt(clean, 11.2); await ready(clean);
     assert.equal(await clean.locator('.lab-side .objectives li.missing').count(), 0, `Case ${i + 1}: a must-show KEEP is missing`);
+    if (i === 0) {
+      assert.equal(await homeButton(clean).count(), 1, 'Home in the lab');
+      assert.equal(await clean.locator('.lab [role=marquee]').count(), 1, 'Dispatch chatter in the lab');
+      // The upload screen is brief, so record whether it offered Home as it went by.
+      await clean.evaluate(() => {
+        const seen = new MutationObserver(() => { if (document.querySelector('.screen.center .home-toggle') && /Uploading/.test(document.body.textContent)) window.__uploadHome = true; });
+        seen.observe(document.body, { childList: true, subtree: true });
+      });
+    }
     await clean.getByRole('button', { name: /Send to evidence/ }).click();
     await clean.waitForSelector('.ledger');
+    if (i === 0) {
+      assert.equal(await clean.evaluate(() => window.__uploadHome), true, 'Home on the upload screen');
+      assert.equal(await homeButton(clean).count(), 1, 'Home on the verdict');
+    }
     assert.equal(await clean.locator('.stamp-text').innerText(), 'CASE DISMISSED');
     assert.ok((await clean.locator('.verdict .box span').allInnerTexts()).every(label => label === 'CLEAN' || label === 'INTACT'));
     if (i === 0) {
@@ -126,8 +154,21 @@ try {
   assert.equal(await clean.getByRole('button', { name: 'Post to leaderboard' }).count(), 0);
   await clean.getByRole('button', { name: 'Run it back', exact: true }).click();
   assert.match(await clean.locator('.case-no').innerText(), /CASE 1/);
+  // Mid-run, Home asks first. With nothing finished there is no rap sheet to offer.
+  await homeButton(clean).click();
+  const leave = clean.locator('dialog[open]');
+  assert.match(await leave.innerText(), /Nothing's finished yet/);
+  assert.deepEqual(await leave.getByRole('button').allInnerTexts(), ['Keep playing', 'Go to the homepage']);
+  await leave.getByRole('button', { name: 'Go to the homepage', exact: true }).click();
+  await assertHome(clean, 'the tape');
+  // The hero's TOP FIXER readout shows the board's #1, which now includes the posted run.
+  const top = (await clean.evaluate(() => fetch('/api/leaderboard').then(r => r.json()))).top[0];
+  const readout = clean.getByRole('link', { name: /^TOP FIXER/ });
+  assert.equal(await readout.getAttribute('href'), '#leaders');
+  assert.match(await readout.innerText(), new RegExp(`TOP FIXER\\s+\\$${top.cash.toLocaleString('en-US')}\\s+#1 ${top.name.toUpperCase()}`));
+  assert.match(await clean.locator('#leaders .ler-board').innerText(), /Release Tester/);
   await clean.close();
-  console.log('PASS production: five clean cases, winning ending, poster download, leaderboard post, replay');
+  console.log('PASS production: five clean cases, winning ending, poster download, leaderboard post, replay, Home mid-run, hero TOP FIXER');
 
   const recovery = await openGame('fail-once', 390);
   await freezeAt(recovery);
@@ -147,10 +188,20 @@ try {
   await recovery.evaluate(() => { window.__corrupt = true; });
   await recovery.getByRole('button', { name: /Send to evidence/ }).click();
   await recovery.getByRole('button', { name: 'Retry forensics', exact: true }).waitFor();
+  assert.equal(await homeButton(recovery).count(), 1, 'Home on the forensics error screen');
   await recovery.getByRole('button', { name: 'Redo this tape', exact: true }).click();
   assert.match(await recovery.locator('.case-no').innerText(), /CASE 1/);
+  // Home from the lab asks first, then drops the run.
+  await recovery.evaluate(() => { window.__corrupt = false; });
+  await freezeAt(recovery); await ready(recovery);
+  await homeButton(recovery).click();
+  await recovery.getByRole('button', { name: 'Keep playing', exact: true }).click();
+  assert.equal(await recovery.locator('.lab').count(), 1, 'Keep playing stays in the lab');
+  await homeButton(recovery).click();
+  await recovery.getByRole('button', { name: 'Go to the homepage', exact: true }).click();
+  await assertHome(recovery, 'the lab');
   await recovery.close();
-  console.log('PASS production: editor failure/retry, export recovery, analysis recovery, mobile lab');
+  console.log('PASS production: editor failure/retry, export recovery, analysis recovery, mobile lab, Home from the lab');
 
   // Early freeze: Jason is still inside, so only the plate is evidence; the tape time is off the clock.
   const surprise = await openGame();
@@ -168,18 +219,31 @@ try {
   await surprise.locator('.verdict-body .btn.primary').click();
   // Walking away keeps a rap sheet of the finished job but stays off the board.
   await surprise.waitForSelector('.feed');
-  await surprise.getByRole('button', { name: 'Quit', exact: true }).click();
+  await homeButton(surprise).click();
+  assert.deepEqual(await surprise.locator('dialog[open]').getByRole('button').allInnerTexts(), ['Keep playing', 'See my rap sheet', 'Go to the homepage']);
+  assert.match(await surprise.locator('dialog[open]').innerText(), /finished 1 job/);
   await surprise.getByRole('button', { name: 'Keep playing', exact: true }).click();
   assert.equal(await surprise.locator('.feed').count(), 1);
-  await surprise.getByRole('button', { name: 'Quit', exact: true }).click();
-  await surprise.getByRole('button', { name: 'Walk away', exact: true }).click();
+  assert.equal(await surprise.locator('dialog[open]').count(), 0);
+  await homeButton(surprise).click();
+  await surprise.getByRole('button', { name: 'See my rap sheet', exact: true }).click();
   await surprise.waitForSelector('.rapsheet .poster');
   assert.equal(await surprise.locator('.logo').innerText(), 'WALKED AWAY');
   assert.match(await surprise.locator('.board-panel').innerText(), /walk away from don't make the board/);
   assert.match(await surprise.locator('.board-panel').innerText(), /offline/);
   assert.equal(await surprise.getByRole('button', { name: 'Post to leaderboard' }).count(), 0);
+  // On the rap sheet Home goes straight to the landing page, and the next run starts from scratch.
+  // Clicked in place: a normal click would scroll the button (and the page) to the top first.
+  await surprise.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  assert.ok(await surprise.evaluate(() => scrollY > 0));
+  await homeButton(surprise).evaluate(el => el.click());
+  await assertHome(surprise, 'the rap sheet');
+  assert.equal(await surprise.locator('.ler-top-fixer').count(), 0, 'No TOP FIXER readout while the board is offline');
+  await surprise.locator('.ler-play button').click();
+  assert.match(await surprise.locator('.case-no').innerText(), /CASE 1/);
+  assert.equal(await surprise.locator('.brief-head .cash').innerText(), '$0');
   await surprise.close();
-  console.log('PASS production: out-of-sight evidence, clock after the tape, mid-edit surprise, quit to rap sheet, board offline');
+  console.log('PASS production: out-of-sight evidence, clock after the tape, mid-edit surprise, walk away to rap sheet, Home from the rap sheet, board offline');
 
   const timeout = await openGame('original');
   // The tape runs on animation frames, so fake the clock only once the lab's countdown is running.
